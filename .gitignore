@@ -12,9 +12,8 @@ debug/
 *.dll
 *.exe
 
-# Cargo.lock is included for libraries per Rust convention
-# Uncomment if this becomes a binary project:
-# Cargo.lock
+# Library crate — let consumers resolve their own versions
+Cargo.lock
 
 # IDE / Editor
 .idea/
