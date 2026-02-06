@@ -23,7 +23,7 @@ fn make_cs() -> ChadSelect {
 #[test]
 fn select_by_class() {
     let cs = make_cs();
-    let results = cs.query(-1, "css:.price", None);
+    let results = cs.query(-1, "css:.price");
     assert_eq!(results.len(), 2);
 }
 
@@ -37,7 +37,7 @@ fn select_by_class_first() {
 #[test]
 fn select_by_tag() {
     let cs = make_cs();
-    let results = cs.query(-1, "css:a", None);
+    let results = cs.query(-1, "css:a");
     assert_eq!(results, vec!["Click here"]);
 }
 
@@ -46,28 +46,28 @@ fn select_by_tag() {
 #[test]
 fn css_normalize_space() {
     let cs = make_cs();
-    let results = cs.query(-1, "css:.price >> normalize-space()", None);
+    let results = cs.query(-1, "css:.price >> normalize-space()");
     assert_eq!(results, vec!["$100", "$200"]);
 }
 
 #[test]
 fn css_replace_function() {
     let cs = make_cs();
-    let results = cs.query(-1, r#"css:.price >> normalize-space() >> replace("$", "USD ")"#, None);
+    let results = cs.query(-1, r#"css:.price >> normalize-space() >> replace("$", "USD ")"#);
     assert_eq!(results, vec!["USD 100", "USD 200"]);
 }
 
 #[test]
 fn css_substring_after() {
     let cs = make_cs();
-    let results = cs.query(-1, r#"css:.vin >> substring-after("VIN: ")"#, None);
+    let results = cs.query(-1, r#"css:.vin >> substring-after("VIN: ")"#);
     assert_eq!(results, vec!["1HGCM82633A123456"]);
 }
 
 #[test]
 fn css_substring_before() {
     let cs = make_cs();
-    let results = cs.query(-1, r#"css:.info >> substring-before(": ")"#, None);
+    let results = cs.query(-1, r#"css:.info >> substring-before(": ")"#);
     assert_eq!(results, vec!["Price"]);
 }
 
@@ -77,7 +77,6 @@ fn css_chained_functions() {
     let results = cs.query(
         -1,
         r#"css:.vin >> substring-after("VIN: ") >> substring(0, 3) >> lowercase()"#,
-        None,
     );
     assert_eq!(results, vec!["1hg"]);
 }
@@ -87,14 +86,14 @@ fn css_chained_functions() {
 #[test]
 fn css_get_attr() {
     let cs = make_cs();
-    let results = cs.query(-1, "css:a.link >> get-attr('href')", None);
+    let results = cs.query(-1, "css:a.link >> get-attr('href')");
     assert_eq!(results, vec!["https://example.com"]);
 }
 
 #[test]
 fn css_get_attr_missing() {
     let cs = make_cs();
-    let results = cs.query(-1, "css:a.link >> get-attr('data-nope')", None);
+    let results = cs.query(-1, "css:a.link >> get-attr('data-nope')");
     assert!(results.is_empty());
 }
 
@@ -129,49 +128,49 @@ fn make_pseudo_cs() -> ChadSelect {
 #[test]
 fn has_text_selects_ancestor() {
     let cs = make_pseudo_cs();
-    let results = cs.query(-1, "css:.item:has-text('Exterior:') .value", None);
+    let results = cs.query(-1, "css:.item:has-text('Exterior:') .value");
     assert_eq!(results, vec!["Blue Metallic"]);
 }
 
 #[test]
 fn contains_text_matches_direct() {
     let cs = make_pseudo_cs();
-    let results = cs.query(-1, "css:.label:contains-text('Interior:')", None);
+    let results = cs.query(-1, "css:.label:contains-text('Interior:')");
     assert_eq!(results, vec!["Interior:"]);
 }
 
 #[test]
 fn text_equals_exact_match() {
     let cs = make_pseudo_cs();
-    let results = cs.query(-1, "css:.value:text-equals('V6 Turbo')", None);
+    let results = cs.query(-1, "css:.value:text-equals('V6 Turbo')");
     assert_eq!(results, vec!["V6 Turbo"]);
 }
 
 #[test]
 fn text_starts_prefix_match() {
     let cs = make_pseudo_cs();
-    let results = cs.query(-1, "css:.value:text-starts('Black')", None);
+    let results = cs.query(-1, "css:.value:text-starts('Black')");
     assert_eq!(results, vec!["Black Leather"]);
 }
 
 #[test]
 fn text_ends_suffix_match() {
     let cs = make_pseudo_cs();
-    let results = cs.query(-1, "css:.value:text-ends('Metallic')", None);
+    let results = cs.query(-1, "css:.value:text-ends('Metallic')");
     assert_eq!(results, vec!["Blue Metallic"]);
 }
 
 #[test]
 fn pseudo_with_postprocess_function() {
     let cs = make_pseudo_cs();
-    let results = cs.query(-1, "css:.item:has-text('Engine:') .value >> uppercase()", None);
+    let results = cs.query(-1, "css:.item:has-text('Engine:') .value >> uppercase()");
     assert_eq!(results, vec!["V6 TURBO"]);
 }
 
 #[test]
 fn pseudo_with_trim() {
     let cs = make_pseudo_cs();
-    let results = cs.query(-1, "css:.item:has-text('Interior') .value >> trim()", None);
+    let results = cs.query(-1, "css:.item:has-text('Interior') .value >> trim()");
     assert_eq!(results, vec!["Black Leather"]);
 }
 
@@ -180,14 +179,14 @@ fn pseudo_with_trim() {
 #[test]
 fn invalid_css_selector_returns_empty() {
     let cs = make_cs();
-    let results = cs.query(-1, "css:>>>invalid<<<", None);
+    let results = cs.query(-1, "css:>>>invalid<<<");
     assert!(results.is_empty());
 }
 
 #[test]
 fn css_no_match_returns_empty() {
     let cs = make_cs();
-    let results = cs.query(-1, "css:.nonexistent", None);
+    let results = cs.query(-1, "css:.nonexistent");
     assert!(results.is_empty());
 }
 
@@ -196,13 +195,13 @@ fn css_no_match_returns_empty() {
 #[test]
 fn css_index_first() {
     let cs = make_cs();
-    let results = cs.query(0, "css:.price", None);
+    let results = cs.query(0, "css:.price");
     assert_eq!(results.len(), 1);
 }
 
 #[test]
 fn css_index_out_of_bounds() {
     let cs = make_cs();
-    let results = cs.query(10, "css:.price", None);
+    let results = cs.query(10, "css:.price");
     assert!(results.is_empty());
 }

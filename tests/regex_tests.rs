@@ -9,7 +9,7 @@ fn capture_group_extracts_value() {
     let mut cs = ChadSelect::new();
     cs.add_text(r#"vehicleLat":"40.7128""#.to_string());
 
-    let results = cs.query(-1, r#"regex:vehicleLat":"([0-9.]+)""#, None);
+    let results = cs.query(-1, r#"regex:vehicleLat":"([0-9.]+)""#);
     assert_eq!(results, vec!["40.7128"]);
 }
 
@@ -18,7 +18,7 @@ fn no_capture_group_returns_full_match() {
     let mut cs = ChadSelect::new();
     cs.add_text("price: $100, price: $200".to_string());
 
-    let results = cs.query(-1, r"regex:\$\d+", None);
+    let results = cs.query(-1, r"regex:\$\d+");
     assert_eq!(results, vec!["$100", "$200"]);
 }
 
@@ -27,7 +27,7 @@ fn multiple_capture_groups() {
     let mut cs = ChadSelect::new();
     cs.add_text("2024-01-15".to_string());
 
-    let results = cs.query(-1, r"regex:(\d{4})-(\d{2})-(\d{2})", None);
+    let results = cs.query(-1, r"regex:(\d{4})-(\d{2})-(\d{2})");
     assert_eq!(results, vec!["2024", "01", "15"]);
 }
 
@@ -38,7 +38,7 @@ fn index_all_returns_every_match() {
     let mut cs = ChadSelect::new();
     cs.add_text("price: $100, price: $200, price: $300".to_string());
 
-    let results = cs.query(-1, r"regex:\$(\d+)", None);
+    let results = cs.query(-1, r"regex:\$(\d+)");
     assert_eq!(results, vec!["100", "200", "300"]);
 }
 
@@ -47,7 +47,7 @@ fn index_zero_returns_first_match() {
     let mut cs = ChadSelect::new();
     cs.add_text("price: $100, price: $200, price: $300".to_string());
 
-    let results = cs.query(0, r"regex:\$(\d+)", None);
+    let results = cs.query(0, r"regex:\$(\d+)");
     assert_eq!(results, vec!["100"]);
 }
 
@@ -56,7 +56,7 @@ fn index_one_returns_second_match() {
     let mut cs = ChadSelect::new();
     cs.add_text("price: $100, price: $200, price: $300".to_string());
 
-    let results = cs.query(1, r"regex:\$(\d+)", None);
+    let results = cs.query(1, r"regex:\$(\d+)");
     assert_eq!(results, vec!["200"]);
 }
 
@@ -65,7 +65,7 @@ fn out_of_bounds_index_returns_empty() {
     let mut cs = ChadSelect::new();
     cs.add_text("price: $100".to_string());
 
-    let results = cs.query(5, r"regex:\$(\d+)", None);
+    let results = cs.query(5, r"regex:\$(\d+)");
     assert!(results.is_empty());
 }
 
@@ -76,7 +76,7 @@ fn invalid_regex_returns_empty() {
     let mut cs = ChadSelect::new();
     cs.add_text("test content".to_string());
 
-    let results = cs.query(-1, r"regex:[", None);
+    let results = cs.query(-1, r"regex:[");
     assert!(results.is_empty());
 }
 
@@ -85,7 +85,7 @@ fn no_match_returns_empty() {
     let mut cs = ChadSelect::new();
     cs.add_text("hello world".to_string());
 
-    let results = cs.query(-1, r"regex:(\d+)", None);
+    let results = cs.query(-1, r"regex:(\d+)");
     assert!(results.is_empty());
 }
 
@@ -98,7 +98,7 @@ fn regex_works_across_multiple_content_items() {
     cs.add_text("price: $200".to_string());
     cs.add_html("<span>price: $300</span>".to_string());
 
-    let results = cs.query(-1, r"regex:\$(\d+)", None);
+    let results = cs.query(-1, r"regex:\$(\d+)");
     assert_eq!(results, vec!["100", "200", "300"]);
 }
 
@@ -107,7 +107,7 @@ fn regex_works_on_json_content() {
     let mut cs = ChadSelect::new();
     cs.add_json(r#"{"price": 42}"#.to_string());
 
-    let results = cs.query(-1, r#"regex:"price":\s*(\d+)"#, None);
+    let results = cs.query(-1, r#"regex:"price":\s*(\d+)"#);
     assert_eq!(results, vec!["42"]);
 }
 
@@ -118,7 +118,7 @@ fn no_prefix_defaults_to_regex() {
     let mut cs = ChadSelect::new();
     cs.add_text("hello world".to_string());
 
-    let results = cs.query(-1, r"(world)", None);
+    let results = cs.query(-1, r"(world)");
     assert_eq!(results, vec!["world"]);
 }
 

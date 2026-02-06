@@ -105,7 +105,6 @@ impl ChadSelect {
     /// - `index = -1` returns **all** matches.
     /// - `index >= 0` returns the match at that position (or empty if out of
     ///   bounds).
-    /// - `content_type_override` forces a specific content type for routing.
     ///
     /// **Never panics** — invalid queries or out-of-bounds indices return an
     /// empty vector.
@@ -113,7 +112,6 @@ impl ChadSelect {
         &self,
         index: i32,
         query_str: &str,
-        content_type_override: Option<ContentType>,
     ) -> Vec<String> {
         let query_type = match query::parse_query(query_str) {
             Ok(qt) => qt,
@@ -126,17 +124,13 @@ impl ChadSelect {
         let mut all_results = Vec::new();
 
         for content_item in &self.content_list {
-            let effective_type = content_type_override
-                .clone()
-                .unwrap_or_else(|| content_item.content_type.clone());
-
-            if !query::is_query_compatible(&query_type, &effective_type) {
+            if !query::is_query_compatible(&query_type, &content_item.content_type) {
                 continue;
             }
 
             let results = match &query_type {
                 QueryType::Regex(pattern) => {
-                    engine::regex::process(pattern, &content_item.content, &effective_type)
+                    engine::regex::process(pattern, &content_item.content, &content_item.content_type)
                 }
                 QueryType::JsonPath(path) => engine::json::process(path, content_item),
                 QueryType::CssSelector(selector) => engine::css::process(selector, content_item),
@@ -153,22 +147,82 @@ impl ChadSelect {
 
     /// Return a single result string (the first match), or an empty string.
     ///
-    /// Shorthand for `query(index, query_str, None)[0]` with safe fallback.
+    /// A result is considered **valid** when it is not empty and not
+    /// whitespace-only.
+    ///
+    /// Shorthand for `query(index, query_str)[0]` with safe fallback.
     pub fn select(&self, index: i32, query_str: &str) -> String {
-        let result = self.query(index, query_str, None);
-        if !result.is_empty() && !result[0].trim().is_empty() {
+        self.select_where(index, query_str, default_valid)
+    }
+
+    /// Like [`select`](ChadSelect::select) but with a custom validity check.
+    ///
+    /// The `valid` closure receives each candidate `&str` and returns `true`
+    /// if the value should be accepted.
+    ///
+    /// ```rust
+    /// use chadselect::ChadSelect;
+    ///
+    /// let mut cs = ChadSelect::new();
+    /// cs.add_text("count: 0".to_string());
+    ///
+    /// // Default: "0" is valid (non-empty, non-whitespace)
+    /// let r = cs.select(0, r"(\d+)");
+    /// assert_eq!(r, "0");
+    ///
+    /// // Custom: reject "0" as invalid
+    /// let r = cs.select_where(0, r"(\d+)", |s| s != "0");
+    /// assert_eq!(r, "");
+    /// ```
+    pub fn select_where<F>(&self, index: i32, query_str: &str, valid: F) -> String
+    where
+        F: Fn(&str) -> bool,
+    {
+        let result = self.query(index, query_str);
+        if !result.is_empty() && valid(&result[0]) {
             return result[0].clone();
         }
         String::new()
     }
 
-    /// Try multiple queries in order and return the first non-empty result set.
+    /// Try multiple queries in order and return the first valid result set.
+    ///
+    /// A result is considered **valid** when it is not empty and not
+    /// whitespace-only.
     ///
     /// Useful for fallback chains where several selectors may match the data.
     pub fn select_first(&self, queries: Vec<(i32, &str)>) -> Vec<String> {
+        self.select_first_where(queries, default_valid)
+    }
+
+    /// Like [`select_first`](ChadSelect::select_first) but with a custom
+    /// validity check.
+    ///
+    /// The `valid` closure receives each candidate `&str` and returns `true`
+    /// if the value should be accepted. The first query whose results
+    /// **all** pass the check wins.
+    ///
+    /// ```rust
+    /// use chadselect::ChadSelect;
+    ///
+    /// let mut cs = ChadSelect::new();
+    /// cs.add_text("a: 0\nb: 42".to_string());
+    ///
+    /// // First query matches "0", but our validator rejects it.
+    /// // Falls through to the second query which matches "42".
+    /// let r = cs.select_first_where(
+    ///     vec![(0, r"a: (\d+)"), (0, r"b: (\d+)")],
+    ///     |s| s != "0",
+    /// );
+    /// assert_eq!(r, vec!["42"]);
+    /// ```
+    pub fn select_first_where<F>(&self, queries: Vec<(i32, &str)>, valid: F) -> Vec<String>
+    where
+        F: Fn(&str) -> bool,
+    {
         for (index, query_str) in queries {
-            let result = self.query(index, query_str, None);
-            if !result.is_empty() && !result[0].trim().is_empty() {
+            let result = self.query(index, query_str);
+            if !result.is_empty() && result.iter().all(|r| valid(r)) {
                 return result;
             }
         }
@@ -176,14 +230,27 @@ impl ChadSelect {
     }
 
     /// Run multiple queries and return the combined unique results.
+    ///
+    /// Only results that are non-empty and non-whitespace are included.
     pub fn select_many(&self, queries: Vec<(i32, &str)>) -> Vec<String> {
+        self.select_many_where(queries, default_valid)
+    }
+
+    /// Like [`select_many`](ChadSelect::select_many) but with a custom
+    /// validity check.
+    ///
+    /// The `valid` closure receives each candidate `&str` and returns `true`
+    /// if the value should be included in the output.
+    pub fn select_many_where<F>(&self, queries: Vec<(i32, &str)>, valid: F) -> Vec<String>
+    where
+        F: Fn(&str) -> bool,
+    {
         let mut all_results = HashSet::new();
         for (index, query_str) in queries {
-            let results = self.query(index, query_str, None);
+            let results = self.query(index, query_str);
             for result in results {
-                let trimmed = result.trim();
-                if !trimmed.is_empty() {
-                    all_results.insert(trimmed.to_string());
+                if valid(&result) {
+                    all_results.insert(result);
                 }
             }
         }
@@ -217,4 +284,12 @@ fn select_by_index(results: Vec<String>, index: i32) -> Vec<String> {
             vec![]
         }
     }
+}
+
+/// Default validity check used by [`ChadSelect::select`],
+/// [`ChadSelect::select_first`], and [`ChadSelect::select_many`].
+///
+/// A value is valid when it is **not empty** and **not whitespace-only**.
+pub fn default_valid(value: &str) -> bool {
+    !value.trim().is_empty()
 }

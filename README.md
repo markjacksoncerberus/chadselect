@@ -120,19 +120,16 @@ cs.select(0, "css:.title");
 cs.select(1, "css:.title");
 ```
 
-#### `query(index, query, content_type_override) -> Vec<String>`
+#### `query(index, query) -> Vec<String>`
 
 Returns all matches as a vector. Use index `-1` for all results.
 
 ```rust
 // All matches
-let all = cs.query(-1, "css:.price", None);
+let all = cs.query(-1, "css:.price");
 
 // Specific index
-let first = cs.query(0, "css:.price", None);
-
-// Override content type
-let result = cs.query(0, r"regex:\d+", Some(ContentType::Html));
+let first = cs.query(0, "css:.price");
 ```
 
 #### `select_first(queries) -> Vec<String>`
@@ -157,6 +154,63 @@ let results = cs.select_many(vec![
     (-1, "css:.sale-price"),
     (-1, "xpath://span[@class='msrp']/text()"),
 ]);
+```
+
+### Custom Validators (`_where` variants)
+
+By default, `select`, `select_first`, and `select_many` treat a result as **valid** when it is non-empty and non-whitespace. This is exposed as `chadselect::default_valid`.
+
+Sometimes that's not enough — you might want to reject `"0"`, require a minimum length, or validate that a result parses as a number in a certain range. The `_where` variants accept a closure `Fn(&str) -> bool` that defines what "valid" means for your use case.
+
+#### `select_where(index, query, valid) -> String`
+
+```rust
+// Reject "0" as a price — fall back to empty string
+let price = cs.select_where(0, "css:.price", |s| s != "0");
+```
+
+#### `select_first_where(queries, valid) -> Vec<String>`
+
+Falls through queries until one produces results that **all** pass the validator.
+
+```rust
+// Skip queries that return "0", "N/A", or empty-ish values
+let result = cs.select_first_where(
+    vec![
+        (0, "css:.primary-price"),
+        (0, "css:.sale-price"),
+        (0, r"regex:price:\s*(\d+)"),
+    ],
+    |s| s != "0" && s != "N/A",
+);
+```
+
+#### `select_many_where(queries, valid) -> Vec<String>`
+
+Only includes results that pass the validator.
+
+```rust
+// Collect all prices, but only keep values > $10
+let prices = cs.select_many_where(
+    vec![(-1, "css:.price")],
+    |s| s.parse::<f64>().map_or(false, |n| n > 10.0),
+);
+```
+
+#### Real-world examples
+
+```rust
+// Minimum length — reject short/garbage extractions
+cs.select_where(0, "css:.vin", |s| s.len() >= 17);
+
+// Must be numeric
+cs.select_where(0, "json:mileage", |s| s.parse::<f64>().is_ok());
+
+// Compose with the default validator + extra checks
+cs.select_first_where(
+    vec![(0, "css:.year")],
+    |s| chadselect::default_valid(s) && s.len() == 4,
+);
 ```
 
 ---
@@ -249,7 +303,7 @@ let lat = cs.select(0, r#"regex:vehicleLat":"([0-9.]+)""#);
 // => "40.7128"
 
 // Without capture group — returns full match
-let prices = cs.query(-1, r"regex:\$\d+", None);
+let prices = cs.query(-1, r"regex:\$\d+");
 // => ["$100", "$200", "$300"]
 ```
 
@@ -273,7 +327,7 @@ cs.select(0, "xpath:normalize-space(//h1)");
 cs.select(0, "xpath:string(//span[@id='vin'])");
 
 // XPath union operator (|) works without conflict
-cs.query(-1, "xpath://h1/text() | //h2/text()", None);
+cs.query(-1, "xpath://h1/text() | //h2/text()");
 
 // With post-processing via >>
 cs.select(0, "xpath://div[@class='vin']/text() >> substring-after('VIN: ')");
@@ -300,7 +354,7 @@ let name = cs.select(0, "json:store.inventory[0].name");
 // => "Widget"
 
 // Array projection
-let names = cs.query(-1, "json:store.inventory[].name", None);
+let names = cs.query(-1, "json:store.inventory[].name");
 // => ["Widget", "Gadget"]
 ```
 
@@ -317,7 +371,7 @@ cs.add_text("price: $200".to_string());
 cs.add_html("<span>price: $300</span>".to_string());
 
 // Regex searches across all loaded content
-let prices = cs.query(-1, r"regex:\$(\d+)", None);
+let prices = cs.query(-1, r"regex:\$(\d+)");
 // => ["100", "200", "300"]
 ```
 
