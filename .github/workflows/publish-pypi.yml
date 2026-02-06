@@ -17,19 +17,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Linux x86_64
           - os: ubuntu-latest
             target: x86_64
-          # Linux aarch64
           - os: ubuntu-latest
             target: aarch64
-          # macOS x86_64
           - os: macos-13
             target: x86_64
-          # macOS Apple Silicon
           - os: macos-14
             target: aarch64
-          # Windows x86_64
           - os: windows-latest
             target: x64
 
@@ -44,7 +39,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
-          args: --release --out dist
+          args: --release --out dist --find-interpreter
           sccache: "true"
           manylinux: auto
           working-directory: chadselect-py
@@ -83,7 +78,6 @@ jobs:
     environment:
       name: pypi
       url: https://pypi.org/p/chadselect
-    # Use trusted publishing OR API token
     permissions:
       id-token: write
     steps:
