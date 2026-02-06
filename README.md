@@ -54,7 +54,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-chadselect = "0.1"
+chadselect = "0.1.1"
 ```
 
 ---
