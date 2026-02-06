@@ -1,0 +1,22 @@
+[package]
+name = "chadselect"
+version = "0.1.0"
+edition = "2021"
+description = "Unified data extraction — Regex, XPath 1.0, CSS Selectors, and JMESPath behind one query interface"
+license = "MIT"
+repository = "https://github.com/chadselect/chadselect"
+keywords = ["scraping", "xpath", "css", "jmespath", "extraction"]
+categories = ["parsing", "web-programming"]
+
+[dependencies]
+regex = "1"
+serde_json = "1"
+scraper = "0.21"
+sxd_html = "0.1"
+sxd-document = "0.3"
+sxd-xpath = "0.4"
+jmespath = "0.3"
+log = "0.4"
+
+[dev-dependencies]
+env_logger = "0.11"
