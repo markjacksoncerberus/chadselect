@@ -256,6 +256,19 @@ impl ChadSelect {
         }
         all_results.into_iter().collect()
     }
+
+    /// Execute multiple queries in a single call and return each result set.
+    ///
+    /// This is the most efficient way to extract many fields from the same
+    /// content — one boundary crossing, all queries executed in Rust.
+    ///
+    /// Returns a `Vec<Vec<String>>` with one entry per input query, in order.
+    pub fn query_batch(&self, queries: &[(i32, &str)]) -> Vec<Vec<String>> {
+        queries
+            .iter()
+            .map(|(index, query_str)| self.query(*index, query_str))
+            .collect()
+    }
 }
 
 impl Default for ChadSelect {

@@ -1,35 +1,54 @@
 [build-system]
-requires = ["maturin>=1.7,<2.0"]
-build-backend = "maturin"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "chadselect"
-version = "0.1.0"
-description = "Unified data extraction — Regex, XPath 1.0, CSS Selectors, and JMESPath behind one query interface. Powered by Rust."
+version = "0.2.0"
+description = "Unified data extraction — CSS, XPath, Regex, and JMESPath behind one query interface."
 readme = "README.md"
-license = { text = "MIT" }
+license = {text = "MIT"}
 requires-python = ">=3.9"
-keywords = ["scraping", "xpath", "css", "jmespath", "extraction", "rust"]
+authors = [
+    {name = "Mark Jackson"},
+]
+keywords = ["scraping", "css", "xpath", "regex", "jmespath", "extraction", "parsing"]
 classifiers = [
-    "Programming Language :: Rust",
-    "Programming Language :: Python :: Implementation :: CPython",
-    "Programming Language :: Python :: Implementation :: PyPy",
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
     "Topic :: Text Processing :: Markup :: HTML",
     "Topic :: Text Processing :: Markup :: XML",
     "Typing :: Typed",
 ]
+dependencies = [
+    "selectolax>=0.3.21",
+    "lxml>=5.0",
+    "jmespath>=1.0",
+]
 
 [project.urls]
+Homepage = "https://github.com/markjacksoncerberus/chadselect"
 Repository = "https://github.com/markjacksoncerberus/chadselect"
+Issues = "https://github.com/markjacksoncerberus/chadselect/issues"
 
-[tool.maturin]
-features = ["pyo3/extension-module"]
-python-source = "python"
-module-name = "chadselect._native"
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/chadselect"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-
-[project.optional-dependencies]
-test = ["pytest", "pytest-asyncio"]
