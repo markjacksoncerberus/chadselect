@@ -145,12 +145,15 @@ impl ChadSelect {
         select_by_index(all_results, index)
     }
 
-    /// Return a single result string (the first match), or an empty string.
+    /// Return a single result string, or an empty string.
+    ///
+    /// - `index = -1` queries **all** loaded content and returns the first
+    ///   valid match across every document.
+    /// - `index >= 0` returns the match at that position (or empty if out
+    ///   of bounds).
     ///
     /// A result is considered **valid** when it is not empty and not
-    /// whitespace-only.
-    ///
-    /// Shorthand for `query(index, query_str)[0]` with safe fallback.
+    /// whitespace-only. **Never panics.**
     pub fn select(&self, index: i32, query_str: &str) -> String {
         self.select_where(index, query_str, default_valid)
     }

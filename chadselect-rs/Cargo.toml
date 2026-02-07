@@ -4,6 +4,7 @@ version = "0.2.0"
 edition = "2021"
 description = "Unified data extraction — Regex, XPath 1.0, CSS Selectors, and JMESPath behind one query interface"
 license = "MIT"
+readme = "README.md"
 repository = "https://github.com/markjacksoncerberus/chadselect"
 keywords = ["scraping", "xpath", "css", "jmespath", "extraction"]
 categories = ["parsing", "web-programming"]

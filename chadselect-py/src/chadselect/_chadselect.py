@@ -119,7 +119,13 @@ class ChadSelect:
         return _select_by_index(all_results, index)
 
     def select(self, index: int, query_str: str) -> str:
-        """Return a single result string (the first match), or ``""``.
+        """Return a single result string, or ``""``.
+
+        Args:
+            index: ``-1`` queries **all** loaded content and returns the
+                first valid match across every document. ``>= 0`` returns
+                the match at that position (or ``""`` if out of bounds).
+            query_str: Prefixed query string (e.g. ``"css:.price"``).
 
         A result is valid when it is non-empty and non-whitespace.
         """
@@ -134,6 +140,10 @@ class ChadSelect:
         """Like :meth:`select` but with a custom validity check.
 
         Args:
+            index: ``-1`` queries **all** loaded content and returns the
+                first match that passes *valid*. ``>= 0`` returns the
+                match at that position (or ``""`` if out of bounds).
+            query_str: Prefixed query string (e.g. ``"css:.price"``).
             valid: Receives each candidate string, returns ``True`` to accept.
         """
         result = self.query(index, query_str)

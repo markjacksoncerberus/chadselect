@@ -83,7 +83,7 @@ price = cs.select(0, "css:.price")
 
 ```toml
 [dependencies]
-chadselect = "0.1.2"
+chadselect = "0.2.0"
 ```
 
 ```rust
@@ -117,8 +117,8 @@ Both languages expose the same methods:
 
 | Method | Description |
 |--------|-------------|
-| `select(index, query)` | Single result (string). Empty on no match. |
-| `query(index, query)` | All results (list/vec). `-1` = all matches. |
+| `select(index, query)` | Single result (string). `-1` = search all docs, `N` = Nth match. Empty on no match. |
+| `query(index, query)` | All results (list/vec). `-1` = all matches across all docs, `N` = Nth match. |
 | `select_first(queries)` | Try queries in order, return first hit. |
 | `select_many(queries)` | Combine unique results from multiple queries. |
 | `select_where(index, query, validator)` | Like `select`, but filter with a callback. |
@@ -235,7 +235,7 @@ chadselect/
 │   │   └── engine/ (css, xpath, regex, json)
 │   └── tests/
 └── .github/workflows/
-    ├── publish.yml               # crates.io publish
+    ├── publish-cargo.yml          # crates.io publish
     └── publish-pypi.yml          # PyPI publish
 ```
 
