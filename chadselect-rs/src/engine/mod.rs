@@ -6,4 +6,6 @@
 pub mod css;
 pub mod json;
 pub mod regex;
+pub mod xnode;
 pub mod xpath;
+pub mod xpath_eval;

@@ -8,7 +8,7 @@ Available as a **Rust crate** and a **Python package** — same API, same query 
 
 | Package | Install | Engines |
 |---------|---------|---------|
-| [**chadselect** (Rust)](chadselect-rs/) | `cargo add chadselect` | regex, sxd-xpath, scraper, jmespath |
+| [**chadselect** (Rust)](chadselect-rs/) | `cargo add chadselect` | regex, xrust, scraper, jmespath |
 | [**chadselect** (Python)](chadselect-py/) | `pip install chadselect` | re, lxml, selectolax, jmespath |
 
 ---

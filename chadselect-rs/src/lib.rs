@@ -46,8 +46,6 @@ pub use content::{ContentItem, ContentType};
 pub use functions::supported_text_functions;
 pub use query::{QueryType, FUNCTION_PIPE};
 
-use engine::xpath::XPathCache;
-
 /// Main entry point for data extraction.
 ///
 /// Load content via [`add_html`](ChadSelect::add_html),
@@ -56,7 +54,6 @@ use engine::xpath::XPathCache;
 /// [`query`](ChadSelect::query).
 pub struct ChadSelect {
     content_list: Vec<ContentItem>,
-    xpath_cache: XPathCache,
 }
 
 impl ChadSelect {
@@ -64,7 +61,6 @@ impl ChadSelect {
     pub fn new() -> Self {
         Self {
             content_list: Vec::new(),
-            xpath_cache: XPathCache::new(),
         }
     }
 
@@ -135,7 +131,7 @@ impl ChadSelect {
                 QueryType::JsonPath(path) => engine::json::process(path, content_item),
                 QueryType::CssSelector(selector) => engine::css::process(selector, content_item),
                 QueryType::XPath(xpath) => {
-                    engine::xpath::process(xpath, content_item, &self.xpath_cache)
+                    engine::xpath::process(xpath, content_item)
                 }
             };
 
