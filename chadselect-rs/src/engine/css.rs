@@ -5,7 +5,7 @@
 //! content-based filtering, and post-processing text functions.
 
 use log::warn;
-use scraper::{Html, Selector};
+use scraper::Selector;
 
 use crate::content::ContentItem;
 use crate::functions::{self, TextFunction};
@@ -71,16 +71,8 @@ pub fn process(selector_with_functions: &str, content_item: &ContentItem) -> Vec
 fn process_standard(selector_with_functions: &str, content_item: &ContentItem) -> Vec<String> {
     let (css_selector_str, text_functions) = functions::split_functions(selector_with_functions);
 
-    // Ensure the HTML document is parsed and cached.
-    let mut css_doc_ref = content_item.css_document.borrow_mut();
-    if css_doc_ref.is_none() {
-        *css_doc_ref = Some(Html::parse_document(&content_item.content));
-    }
-
-    let Some(html_doc) = css_doc_ref.as_ref() else {
-        warn!("Failed to access cached CSS document");
-        return vec![];
-    };
+    // Use the shared, already-parsed HTML document.
+    let html_doc = content_item.html();
 
     let css_selector = match Selector::parse(css_selector_str) {
         Ok(s) => s,
@@ -163,16 +155,8 @@ fn process_with_text_selectors(
         Vec::new()
     };
 
-    // Ensure the HTML document is parsed and cached.
-    let mut css_doc_ref = content_item.css_document.borrow_mut();
-    if css_doc_ref.is_none() {
-        *css_doc_ref = Some(Html::parse_document(&content_item.content));
-    }
-
-    let Some(html_doc) = css_doc_ref.as_ref() else {
-        warn!("Failed to access cached CSS document");
-        return vec![];
-    };
+    // Use the shared, already-parsed HTML document.
+    let html_doc = content_item.html();
 
     // Stage 1: Resolve base elements.
     let (base_elements, element_texts): (Vec<_>, Vec<_>) = if parsed.base_selector.is_empty() {
@@ -230,7 +214,7 @@ fn process_with_text_selectors(
     let filtered_elements: Vec<_> = if let Some(text_pseudo) = &parsed.text_pseudo {
         base_elements
             .into_iter()
-            .zip(element_texts.into_iter())
+            .zip(element_texts)
             .filter(|(_, text_content)| match text_pseudo {
                 TextPseudoSelector::HasText(t) => text_content.contains(t.as_str()),
                 TextPseudoSelector::ContainsText(t) => text_content.contains(t.as_str()),
@@ -304,33 +288,27 @@ fn get_cached_elements_data(
         }
     }
 
-    // Cache miss — query and store.
-    let mut css_doc_ref = content_item.css_document.borrow_mut();
-    if css_doc_ref.is_none() {
-        *css_doc_ref = Some(Html::parse_document(&content_item.content));
-    }
+    // Cache miss — query the shared document and store.
+    let html_doc = content_item.html();
+    if let Ok(selector) = Selector::parse(base_selector) {
+        let elements: Vec<_> = html_doc.select(&selector).collect();
+        let cache_data: Vec<_> = elements
+            .iter()
+            .enumerate()
+            .map(|(index, element)| {
+                let text = element
+                    .text()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+                    .trim()
+                    .to_string();
+                (index, text)
+            })
+            .collect();
 
-    if let Some(html_doc) = css_doc_ref.as_ref() {
-        if let Ok(selector) = Selector::parse(base_selector) {
-            let elements: Vec<_> = html_doc.select(&selector).collect();
-            let cache_data: Vec<_> = elements
-                .iter()
-                .enumerate()
-                .map(|(index, element)| {
-                    let text = element
-                        .text()
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                        .trim()
-                        .to_string();
-                    (index, text)
-                })
-                .collect();
-
-            let mut cache = content_item.element_text_cache.borrow_mut();
-            cache.insert(base_selector.to_string(), cache_data.clone());
-            return cache_data;
-        }
+        let mut cache = content_item.element_text_cache.borrow_mut();
+        cache.insert(base_selector.to_string(), cache_data.clone());
+        return cache_data;
     }
 
     Vec::new()

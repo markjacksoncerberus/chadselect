@@ -2,9 +2,9 @@
 
 use scraper::Html;
 use serde_json::Value;
-use sxd_document::Package;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 /// Content type enumeration for explicit content specification.
 #[derive(Debug, Clone, PartialEq)]
@@ -27,12 +27,11 @@ pub struct ContentItem {
     pub content: String,
     /// Declared content type.
     pub content_type: ContentType,
-    /// Lazily parsed XPath document (via `sxd_html`).
-    pub(crate) xpath_document: RefCell<Option<Package>>,
     /// Lazily parsed JSON value.
     pub(crate) json_value: RefCell<Option<Value>>,
-    /// Lazily parsed HTML document for CSS selectors (via `scraper`).
-    pub(crate) css_document: RefCell<Option<Html>>,
+    /// Lazily parsed HTML document (via `scraper`/html5ever), **shared** by
+    /// both the CSS and XPath engines — the HTML is parsed exactly once.
+    pub(crate) html_document: RefCell<Option<Rc<Html>>>,
     /// Element-text cache for CSS text pseudo-selectors: selector → Vec<(element_index, text)>.
     pub(crate) element_text_cache: RefCell<HashMap<String, Vec<(usize, String)>>>,
 }
@@ -43,11 +42,23 @@ impl ContentItem {
         Self {
             content,
             content_type,
-            xpath_document: RefCell::new(None),
             json_value: RefCell::new(None),
-            css_document: RefCell::new(None),
+            html_document: RefCell::new(None),
             element_text_cache: RefCell::new(HashMap::new()),
         }
+    }
+
+    /// Get the shared, lazily-parsed HTML document, parsing it on first use.
+    ///
+    /// Both the CSS engine (`scraper` selectors) and the XPath engine (via the
+    /// `xrust` adapter) call this, so a document is parsed by html5ever **once**
+    /// regardless of how many or which kinds of queries run against it.
+    pub(crate) fn html(&self) -> Rc<Html> {
+        let mut doc = self.html_document.borrow_mut();
+        if doc.is_none() {
+            *doc = Some(Rc::new(Html::parse_document(&self.content)));
+        }
+        doc.as_ref().unwrap().clone()
     }
 }
 

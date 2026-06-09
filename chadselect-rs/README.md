@@ -22,7 +22,7 @@ assert_eq!(price, "$49.99");
 
 ```toml
 [dependencies]
-chadselect = "0.2.1"
+chadselect = "0.3.0"
 ```
 
 ---
@@ -34,7 +34,7 @@ Every query uses an `engine:expression` prefix. No prefix defaults to regex.
 | Prefix | Engine | Content Types | Backed By |
 |--------|--------|---------------|-----------|
 | `css:` | CSS Selectors | HTML | [scraper](https://crates.io/crates/scraper) |
-| `xpath:` | XPath 1.0 | HTML, Text | [sxd-xpath](https://crates.io/crates/sxd-xpath) |
+| `xpath:` | XPath 1.0 | HTML, Text | [xrust](https://crates.io/crates/xrust) over the shared `scraper`/html5ever DOM |
 | `regex:` | Regular Expressions | All | [regex](https://crates.io/crates/regex) |
 | `json:` | JMESPath | JSON | [jmespath](https://crates.io/crates/jmespath) |
 
