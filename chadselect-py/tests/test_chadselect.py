@@ -827,3 +827,34 @@ class TestNewPipeFunctions:
              ">> replace('Interior Color:','') >> replace('Interior:','') "
              ">> normalize-space() >> join(' ')")
         assert self.cs.select(-1, q) == "Black Leather"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  CSS combinators after a text pseudo-selector (BUG D / E) — must match Rust.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestTextPseudoCombinators:
+    def setup_method(self):
+        self.cs = ChadSelect()
+        self.cs.add_html("""
+        <html><body>
+            <div id="sp"><span>VIN</span><span>WP0AB2A90SS225386</span><span>extra</span></div>
+            <div class="r"><span>Exterior Color</span><span>Black</span></div>
+            <div class="r"><span>OEM Exterior Color</span><span>Super Black</span></div>
+        </body></html>
+        """)
+
+    def test_adjacent_sibling(self):
+        assert self.cs.query(-1, "css:span:has-text(VIN) + span") == ["WP0AB2A90SS225386"]
+
+    def test_general_sibling(self):
+        assert self.cs.query(-1, "css:span:has-text(VIN) ~ span") == ["WP0AB2A90SS225386", "extra"]
+
+    def test_descendant_post_still_works(self):
+        assert self.cs.query(-1, "css:div:has-text(VIN) span") == ["VIN", "WP0AB2A90SS225386", "extra"]
+
+    def test_exact_label_then_sibling_value(self):
+        assert self.cs.query(-1, "css:span:text-equals(Exterior Color) + span") == ["Black"]
+
+    def test_unquoted_and_quoted_pseudo_args(self):
+        assert self.cs.query(-1, "css:span:has-text('VIN') + span") == ["WP0AB2A90SS225386"]

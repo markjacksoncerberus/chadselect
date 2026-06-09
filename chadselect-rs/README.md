@@ -22,7 +22,7 @@ assert_eq!(price, "$49.99");
 
 ```toml
 [dependencies]
-chadselect = "0.3.1"
+chadselect = "0.3.2"
 ```
 
 ---
@@ -156,6 +156,11 @@ These work like Playwright's pseudo-selectors — match elements by text content
 | `:text-equals('x')` | Element's text **exactly** equals |
 | `:text-starts('x')` | Element's text **starts** with |
 | `:text-ends('x')` | Element's text **ends** with |
+
+A combinator after the pseudo navigates from the matched element — descendant
+(space), adjacent sibling (`+`), general sibling (`~`), or child (`>`). For
+example `css:span:text-equals('VIN') + span` grabs the value cell next to the
+exact `VIN` label.
 
 ```rust
 let mut cs = ChadSelect::new();

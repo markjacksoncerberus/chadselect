@@ -16,9 +16,17 @@ use crate::engine::{xpath_eval, xpath_rewrite};
 use crate::functions;
 
 /// Below this nesting depth an expression is parsed inline on the caller's
-/// stack (~130 KiB/level in xrust's recursive parser); 8 levels stays well
-/// under a 2 MiB tokio-worker stack.
-const INLINE_SAFE_DEPTH: usize = 8;
+/// Inline-parse threshold for *nesting depth*. xrust's recursive-descent parser
+/// uses stack proportional to both nesting depth and overall expression
+/// length/structure, and debug frames are several× fatter than release — so the
+/// inline budget is tighter in debug builds. Anything above goes to a
+/// large-stack thread.
+const INLINE_SAFE_DEPTH: usize = if cfg!(debug_assertions) { 4 } else { 8 };
+
+/// Inline-parse threshold for raw expression *length*. Long-but-shallow
+/// selectors still recurse deeply in xrust (the parser recurses per step /
+/// operator, not just per bracket), so length is a second, independent trigger.
+const INLINE_SAFE_LEN: usize = if cfg!(debug_assertions) { 96 } else { 384 };
 
 /// Deeper expressions are parsed on a thread with this stack so the recursive
 /// parser cannot overflow small caller stacks (~4000 levels of headroom).
@@ -39,13 +47,17 @@ pub fn process(xpath_with_functions: &str, content_item: &ContentItem) -> Vec<St
     // themselves overflow a small stack on pathologically nested input.
     let depth = xpath_rewrite::nesting_depth(raw_expr);
 
+    // Route to a large-stack thread when the expression is deeply nested OR
+    // long enough that xrust's recursion could overflow the caller's stack.
+    let needs_deep_stack = depth > INLINE_SAFE_DEPTH || raw_expr.len() > INLINE_SAFE_LEN;
+
     let mut results = if depth > MAX_QUERY_DEPTH {
         warn!(
             "XPath expression nested {depth} levels deep (> {MAX_QUERY_DEPTH}); refusing to \
              avoid a stack overflow in the parser"
         );
         vec![]
-    } else if depth > INLINE_SAFE_DEPTH {
+    } else if needs_deep_stack {
         evaluate_on_deep_stack(&content_item.content, raw_expr)
     } else {
         let expr = xpath_rewrite::rewrite_positional_predicates(raw_expr);

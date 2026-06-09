@@ -83,7 +83,7 @@ price = cs.select(0, "css:.price")
 
 ```toml
 [dependencies]
-chadselect = "0.3.1"
+chadselect = "0.3.2"
 ```
 
 ```rust
@@ -206,6 +206,11 @@ result = cs.select(0, "css:.vin >> substring-after('VIN: ') >> substring(0, 3) >
 | `:text-equals('x')` | Text exactly equals |
 | `:text-starts('x')` | Text starts with |
 | `:text-ends('x')` | Text ends with |
+
+A combinator after the pseudo navigates from the matched element: descendant
+(space), adjacent sibling (`+`), general sibling (`~`), or child (`>`) — e.g.
+`css:span:text-equals('VIN') + span` selects the value cell next to the exact
+`VIN` label.
 
 ```python
 color = cs.select(0, "css:.item:has-text('Exterior:') .value")
