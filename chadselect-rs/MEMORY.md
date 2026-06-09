@@ -100,3 +100,41 @@ The XPath adapter rebuilds the document-order rank map once per `evaluate` call
 (O(n)). If a single huge document is queried many times with `xpath:`, caching
 that map alongside the parsed DOM on the `ContentItem` would remove the repeat
 cost. Not currently a bottleneck.
+
+## XPath conformance workarounds (0.3.1)
+
+`xrust` has several XPath-1.0 conformance bugs in predicate evaluation. They are
+worked around in `src/engine/xpath_rewrite.rs` by rewriting positional
+predicates before evaluation:
+
+| xrust bug | symptom | workaround |
+|---|---|---|
+| numeric predicate coerced with `to_bool()` | `[1]`, `[2]` keep **all** nodes | `name[N]` → `name[count(preceding-sibling::name)=N-1]` |
+| `last()` in a predicate returns 1 (single-item context) | `[last()]` wrong | `name[last()]` → `name[not(following-sibling::name)]` |
+| predicate applied over the **flattened** multi-parent node-set | `//tr/td[1]` returns only the first row's cell | per-parent sibling counting (same rewrites — they are relative to each node's own parent) |
+
+Sibling counting is per-parent-correct and uses only axes + `count()` that xrust
+evaluates correctly. Verified by `tests/xpath_conformance_probe.rs` (22 idioms)
+and `tests/bug_a_positional.rs`.
+
+**Residual limitations** (rare; not silently wrong in the common case):
+- A positional predicate on a step with **no simple node test** — a chained
+  predicate like `a[@x][2]` or a parenthesised `(//a)[2]` — falls back to
+  `position()=N`, which is correct for a single-parent context but not across
+  multiple parents (xrust's flattened-position bug remains there).
+- `last()`-arithmetic beyond `last()-K` (e.g. `[last()-1>2]`) is left to xrust.
+
+These stem from xrust's XPath engine, not chadselect. A complete fix would
+require patching xrust's `filter()`/`compose()` (numeric→position conversion,
+full-context `last()`, per-parent predicate grouping) — i.e. maintaining a
+patched fork — or moving the XPath engine to a reference implementation
+(libxml2) while keeping CSS on `scraper`.
+
+## Parser stack-overflow guard (0.3.1)
+
+xrust's recursive parser-combinators use ~130 KiB of stack per nesting level,
+overflowing a 2 MiB tokio-worker stack at ~15 levels (`src/bin` repro from the
+consumer). `engine/xpath.rs` routes expressions by `nesting_depth`: ≤8 inline,
+9..2000 on a 512 MiB-stack thread (re-parsing, since `ENode` is `!Send`),
+>2000 refused (empty + warning) — upholding the never-panics contract.
+Verified by `tests/bug_b_deep_xpath.rs`.

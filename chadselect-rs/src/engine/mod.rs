@@ -9,3 +9,4 @@ pub mod regex;
 pub mod xnode;
 pub mod xpath;
 pub mod xpath_eval;
+pub mod xpath_rewrite;
