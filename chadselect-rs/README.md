@@ -22,7 +22,7 @@ assert_eq!(price, "$49.99");
 
 ```toml
 [dependencies]
-chadselect = "0.3.2"
+chadselect = "0.3.1"
 ```
 
 ---
@@ -339,6 +339,11 @@ regex:pattern >> replace('$', 'USD ')
 | `replace('find', 'repl')` | Replace all occurrences | `css:.price >> replace('$', 'USD ')` |
 | `get-attr('name')` | Element attribute (CSS only) | `css:a.link >> get-attr('href')` |
 | `join('sep')` | Fold **all** results into one string (alias: `concat`) | `css:.crumb >> join(' / ')` |
+| `translate('from','to')` | XPath per-character map/delete | `css:.price >> translate('$,','')` |
+| `regex-extract('pat')` | First capture group, or whole match | `css:.line >> regex-extract('(\d{17})')` |
+| `regex-replace('pat','repl')` | Regex search-and-replace (`$1` group refs) | `css:.mi >> regex-replace('[^0-9]','')` |
+| `substring-after-last('x')` | Text after the **last** delimiter | `... >> substring-after-last('/')` |
+| `substring-before-last('x')` | Text before the **last** delimiter | `... >> substring-before-last('.')` |
 
 ### Chaining Functions
 
