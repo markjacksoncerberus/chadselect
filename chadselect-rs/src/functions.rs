@@ -31,6 +31,10 @@ pub enum TextFunction {
     Replace { find: String, replace: String },
     /// Extract an HTML element attribute by name (CSS only).
     GetAttribute { attribute: String },
+    /// Join **all** results in the chain into a single string with `separator`.
+    /// Unlike the other functions (which map element-wise), this folds the
+    /// whole result list into one value. Spelled `join('sep')` or `concat('sep')`.
+    Join { separator: String },
 }
 
 /// Returns the list of all supported text function signatures.
@@ -45,6 +49,7 @@ pub fn supported_text_functions() -> Vec<&'static str> {
         "substring-before('delimiter')",
         "replace('find', 'replace')",
         "get-attr('attribute')",
+        "join('separator')",
     ]
 }
 
@@ -160,6 +165,11 @@ pub fn parse_text_functions(functions_str: &str) -> Vec<TextFunction> {
                     continue;
                 }
             }
+            // `join('sep')` / `concat('sep')` — fold the result list into one
+            // string. An empty/absent argument joins with no separator.
+            "join" | "concat" => TextFunction::Join {
+                separator: args_str.trim_matches('"').trim_matches('\'').to_string(),
+            },
             _ => {
                 warn!("Unknown text function: {}", func_name);
                 continue;
@@ -178,11 +188,21 @@ pub fn parse_text_functions(functions_str: &str) -> Vec<TextFunction> {
 /// a function are filtered out.
 pub fn apply_text_functions(mut results: Vec<String>, functions: &[TextFunction]) -> Vec<String> {
     for function in functions {
-        results = results
-            .into_iter()
-            .map(|text| apply_single_text_function(&text, function))
-            .filter(|text| !text.is_empty())
-            .collect();
+        match function {
+            // Fold: join the whole list into a single result.
+            TextFunction::Join { separator } => {
+                let joined = results.join(separator.as_str());
+                results = if joined.is_empty() { vec![] } else { vec![joined] };
+            }
+            // Map: transform each element, dropping any that become empty.
+            _ => {
+                results = results
+                    .into_iter()
+                    .map(|text| apply_single_text_function(&text, function))
+                    .filter(|text| !text.is_empty())
+                    .collect();
+            }
+        }
     }
     results
 }
@@ -222,6 +242,10 @@ pub fn apply_single_text_function(text: &str, function: &TextFunction) -> String
         TextFunction::Replace { find, replace } => text.replace(find.as_str(), replace.as_str()),
         TextFunction::GetAttribute { .. } => {
             // Handled specially during CSS processing, not as a generic text function.
+            text.to_string()
+        }
+        TextFunction::Join { .. } => {
+            // Folds the whole list; handled in `apply_text_functions`, not here.
             text.to_string()
         }
     }

@@ -83,7 +83,7 @@ price = cs.select(0, "css:.price")
 
 ```toml
 [dependencies]
-chadselect = "0.3.1"
+chadselect = "0.3.2"
 ```
 
 ```rust
@@ -181,6 +181,7 @@ xpath://path/text() >> function1() >> function2()
 | `substring-before('delim')` | Text before delimiter | `css:.info >> substring-before(': ')` |
 | `replace('find', 'repl')` | Replace text | `css:.price >> replace('$', 'USD ')` |
 | `get-attr('name')` | Element attribute (CSS) | `css:a >> get-attr('href')` |
+| `join('sep')` | Join all results into one string (alias: `concat`) | `css:.crumb >> join(' / ')` |
 
 ### Chaining
 

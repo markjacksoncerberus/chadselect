@@ -22,7 +22,7 @@ assert_eq!(price, "$49.99");
 
 ```toml
 [dependencies]
-chadselect = "0.3.1"
+chadselect = "0.3.2"
 ```
 
 ---
@@ -338,6 +338,7 @@ regex:pattern >> replace('$', 'USD ')
 | `substring-before('delim')` | Text before first delimiter | `css:.info >> substring-before(': ')` |
 | `replace('find', 'repl')` | Replace all occurrences | `css:.price >> replace('$', 'USD ')` |
 | `get-attr('name')` | Element attribute (CSS only) | `css:a.link >> get-attr('href')` |
+| `join('sep')` | Fold **all** results into one string (alias: `concat`) | `css:.crumb >> join(' / ')` |
 
 ### Chaining Functions
 
