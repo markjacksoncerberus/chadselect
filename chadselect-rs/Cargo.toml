@@ -1,6 +1,6 @@
 [package]
 name = "chadselect"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2021"
 description = "Unified data extraction — Regex, XPath 1.0, CSS Selectors, and JMESPath behind one query interface"
 license = "MIT"

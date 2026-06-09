@@ -83,7 +83,7 @@ price = cs.select(0, "css:.price")
 
 ```toml
 [dependencies]
-chadselect = "0.2.1"
+chadselect = "0.3.0"
 ```
 
 ```rust

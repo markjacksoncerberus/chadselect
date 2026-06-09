@@ -22,7 +22,7 @@ assert_eq!(price, "$49.99");
 
 ```toml
 [dependencies]
-chadselect = "0.2.1"
+chadselect = "0.3.0"
 ```
 
 ---
