@@ -7,6 +7,7 @@
 //! ```
 
 use log::warn;
+use regex::Regex;
 
 use crate::query::FUNCTION_PIPE;
 
@@ -31,6 +32,22 @@ pub enum TextFunction {
     Replace { find: String, replace: String },
     /// Extract an HTML element attribute by name (CSS only).
     GetAttribute { attribute: String },
+    /// Join **all** results in the chain into a single string with `separator`.
+    /// Unlike the other functions (which map element-wise), this folds the
+    /// whole result list into one value. Spelled `join('sep')` or `concat('sep')`.
+    Join { separator: String },
+    /// XPath-style `translate(from, to)`: per-character map; a character in
+    /// `from` with no counterpart in `to` is deleted.
+    Translate { from: String, to: String },
+    /// Extract the first regex capture group (or the whole match if the pattern
+    /// has no groups); empty string if it doesn't match.
+    RegexExtract { re: Regex },
+    /// Regex search-and-replace (replacement uses Rust regex `$1` group refs).
+    RegexReplace { re: Regex, replace: String },
+    /// Return everything after the **last** occurrence of the delimiter.
+    SubstringAfterLast { delimiter: String },
+    /// Return everything before the **last** occurrence of the delimiter.
+    SubstringBeforeLast { delimiter: String },
 }
 
 /// Returns the list of all supported text function signatures.
@@ -45,6 +62,12 @@ pub fn supported_text_functions() -> Vec<&'static str> {
         "substring-before('delimiter')",
         "replace('find', 'replace')",
         "get-attr('attribute')",
+        "join('separator')",
+        "translate('from', 'to')",
+        "regex-extract('pattern')",
+        "regex-replace('pattern', 'replacement')",
+        "substring-after-last('delimiter')",
+        "substring-before-last('delimiter')",
     ]
 }
 
@@ -132,17 +155,56 @@ pub fn parse_text_functions(functions_str: &str) -> Vec<TextFunction> {
                 }
             }
             "replace" => {
-                let args: Vec<&str> = args_str.split(',').map(|s| s.trim()).collect();
-                if args.len() >= 2 {
-                    TextFunction::Replace {
-                        find: args[0]
-                            .trim_matches('"')
-                            .trim_matches('\'')
-                            .to_string(),
-                        replace: args[1]
-                            .trim_matches('"')
-                            .trim_matches('\'')
-                            .to_string(),
+                // Quote-aware so `replace(',', '')` (comma in an arg) works.
+                if let Some((find, replace)) = parse_two_quoted(args_str) {
+                    TextFunction::Replace { find, replace }
+                } else {
+                    continue;
+                }
+            }
+            "translate" => {
+                if let Some((from, to)) = parse_two_quoted(args_str) {
+                    TextFunction::Translate { from, to }
+                } else {
+                    continue;
+                }
+            }
+            "regex-extract" => {
+                let pat = args_str.trim().trim_matches('"').trim_matches('\'');
+                match Regex::new(pat) {
+                    Ok(re) => TextFunction::RegexExtract { re },
+                    Err(e) => {
+                        warn!("Invalid regex in regex-extract('{}'): {}", pat, e);
+                        continue;
+                    }
+                }
+            }
+            "regex-replace" => {
+                if let Some((pat, replace)) = parse_two_quoted(args_str) {
+                    match Regex::new(&pat) {
+                        Ok(re) => TextFunction::RegexReplace { re, replace },
+                        Err(e) => {
+                            warn!("Invalid regex in regex-replace('{}'): {}", pat, e);
+                            continue;
+                        }
+                    }
+                } else {
+                    continue;
+                }
+            }
+            "substring-after-last" => {
+                if !args_str.is_empty() {
+                    TextFunction::SubstringAfterLast {
+                        delimiter: args_str.trim_matches('"').trim_matches('\'').to_string(),
+                    }
+                } else {
+                    continue;
+                }
+            }
+            "substring-before-last" => {
+                if !args_str.is_empty() {
+                    TextFunction::SubstringBeforeLast {
+                        delimiter: args_str.trim_matches('"').trim_matches('\'').to_string(),
                     }
                 } else {
                     continue;
@@ -160,6 +222,11 @@ pub fn parse_text_functions(functions_str: &str) -> Vec<TextFunction> {
                     continue;
                 }
             }
+            // `join('sep')` / `concat('sep')` — fold the result list into one
+            // string. An empty/absent argument joins with no separator.
+            "join" | "concat" => TextFunction::Join {
+                separator: args_str.trim_matches('"').trim_matches('\'').to_string(),
+            },
             _ => {
                 warn!("Unknown text function: {}", func_name);
                 continue;
@@ -172,17 +239,58 @@ pub fn parse_text_functions(functions_str: &str) -> Vec<TextFunction> {
     functions
 }
 
+/// Extract two quoted string arguments (single or double quotes) from an
+/// argument list, e.g. `'find', 'replace'`. Quote-aware, so a comma *inside*
+/// an argument (`',', ''`) is not mistaken for the argument separator.
+fn parse_two_quoted(args_str: &str) -> Option<(String, String)> {
+    let chars: Vec<char> = args_str.chars().collect();
+    let mut i = 0;
+    let first = read_quoted(&chars, &mut i)?;
+    let second = read_quoted(&chars, &mut i)?;
+    Some((first, second))
+}
+
+/// Read the next single/double-quoted string starting at or after `*i`,
+/// advancing `*i` past the closing quote.
+fn read_quoted(chars: &[char], i: &mut usize) -> Option<String> {
+    while *i < chars.len() && chars[*i] != '\'' && chars[*i] != '"' {
+        *i += 1;
+    }
+    let quote = *chars.get(*i)?;
+    *i += 1;
+    let start = *i;
+    while *i < chars.len() && chars[*i] != quote {
+        *i += 1;
+    }
+    if *i >= chars.len() {
+        return None; // unterminated
+    }
+    let value: String = chars[start..*i].iter().collect();
+    *i += 1; // consume closing quote
+    Some(value)
+}
+
 /// Apply a chain of text functions to a vector of results.
 ///
 /// Each function is applied to every element; elements that become empty after
 /// a function are filtered out.
 pub fn apply_text_functions(mut results: Vec<String>, functions: &[TextFunction]) -> Vec<String> {
     for function in functions {
-        results = results
-            .into_iter()
-            .map(|text| apply_single_text_function(&text, function))
-            .filter(|text| !text.is_empty())
-            .collect();
+        match function {
+            // Fold: join the whole list into a single result.
+            TextFunction::Join { separator } => {
+                let joined = results.join(separator.as_str());
+                results = if joined.is_empty() { vec![] } else { vec![joined] };
+            }
+            // Map: transform each element, dropping any that become empty.
+            _ => {
+                results = results
+                    .into_iter()
+                    .map(|text| apply_single_text_function(&text, function))
+                    .filter(|text| !text.is_empty())
+                    .collect();
+            }
+        }
     }
     results
 }
@@ -224,5 +332,38 @@ pub fn apply_single_text_function(text: &str, function: &TextFunction) -> String
             // Handled specially during CSS processing, not as a generic text function.
             text.to_string()
         }
+        TextFunction::Join { .. } => {
+            // Folds the whole list; handled in `apply_text_functions`, not here.
+            text.to_string()
+        }
+        TextFunction::Translate { from, to } => {
+            let to_chars: Vec<char> = to.chars().collect();
+            text.chars()
+                .filter_map(|c| match from.chars().position(|fc| fc == c) {
+                    // Mapped char, or deleted when `to` has no counterpart.
+                    Some(idx) => to_chars.get(idx).copied(),
+                    None => Some(c),
+                })
+                .collect()
+        }
+        TextFunction::RegexExtract { re } => match re.captures(text) {
+            Some(caps) => caps
+                .get(1)
+                .or_else(|| caps.get(0))
+                .map(|m| m.as_str().to_string())
+                .unwrap_or_default(),
+            None => String::new(),
+        },
+        TextFunction::RegexReplace { re, replace } => {
+            re.replace_all(text, replace.as_str()).into_owned()
+        }
+        TextFunction::SubstringAfterLast { delimiter } => match text.rfind(delimiter.as_str()) {
+            Some(pos) => text[pos + delimiter.len()..].to_string(),
+            None => String::new(),
+        },
+        TextFunction::SubstringBeforeLast { delimiter } => match text.rfind(delimiter.as_str()) {
+            Some(pos) => text[..pos].to_string(),
+            None => text.to_string(),
+        },
     }
 }

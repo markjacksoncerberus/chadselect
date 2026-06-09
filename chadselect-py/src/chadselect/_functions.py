@@ -29,6 +29,12 @@ def supported_text_functions() -> List[str]:
         "substring-before('delimiter')",
         "replace('find', 'replace')",
         "get-attr('attribute')",
+        "join('separator')",
+        "translate('from', 'to')",
+        "regex-extract('pattern')",
+        "regex-replace('pattern', 'replacement')",
+        "substring-after-last('delimiter')",
+        "substring-before-last('delimiter')",
     ]
 
 
@@ -120,6 +126,62 @@ def _apply_one(results: List[str], func_str: str) -> List[str]:
         # Handled specially by the CSS engine — pass through here
         # (the attr name is extracted at the engine level)
         return results
+
+    if name in ("join", "concat"):
+        # Fold the whole result list into one separator-joined string.
+        sep = args_str.strip().strip("\"'")
+        joined = sep.join(results)
+        return [joined] if joined else []
+
+    if name == "translate":
+        # XPath translate(from, to): per-char map; chars in `from` with no
+        # counterpart in `to` are deleted. First occurrence in `from` wins.
+        args = _parse_two_string_args(args_str)
+        if args:
+            frm, to = args
+            table: dict = {}
+            for idx, ch in enumerate(frm):
+                if ord(ch) not in table:
+                    table[ord(ch)] = to[idx] if idx < len(to) else None
+            return [s.translate(table) for s in results]
+        return results
+
+    if name == "regex-extract":
+        pat = args_str.strip().strip("\"'")
+        try:
+            rx = re.compile(pat)
+        except re.error:
+            return results
+        out = []
+        for s in results:
+            m = rx.search(s)
+            if m:
+                out.append(m.group(1) if m.lastindex else m.group(0))
+        return [r for r in out if r]
+
+    if name == "regex-replace":
+        args = _parse_two_string_args(args_str)
+        if args:
+            pat, repl = args
+            try:
+                return [re.sub(pat, repl, s) for s in results]
+            except re.error:
+                return results
+        return results
+
+    if name == "substring-after-last":
+        delim = args_str.strip().strip("\"'")
+        out = []
+        for s in results:
+            idx = s.rfind(delim)
+            out.append(s[idx + len(delim):] if idx != -1 else "")
+        return [r for r in out if r]
+
+    if name == "substring-before-last":
+        delim = args_str.strip().strip("\"'")
+        return [
+            (s[: s.rfind(delim)] if s.rfind(delim) != -1 else s) for s in results
+        ]
 
     # Unknown function — skip silently
     return results

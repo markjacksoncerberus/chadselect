@@ -774,3 +774,56 @@ class TestDelimiterSafety:
         for r in results:
             assert not r.startswith(" ")
             assert not r.endswith(" ")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  New pipe functions (0.3.1): join/concat, translate, regex-extract/replace,
+#  substring-after-last/before-last. Must match the Rust crate exactly.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestNewPipeFunctions:
+    def setup_method(self):
+        self.cs = ChadSelect()
+        self.cs.add_html("""
+        <html><body>
+            <nav class="crumbs"><a>Home</a><a>Cars</a><a>Civic</a></nav>
+            <span class="price">$1,299.00</span>
+            <span class="mileage">12,345 mi</span>
+            <span class="vinline">VIN: 1HGFE2F59PA000001 (verified)</span>
+            <a class="dl" href="https://x.com/dealer/42">d</a>
+            <span class="file">archive.tar.gz</span>
+            <p class="opt _optInteriorColor">Interior Color: Black</p>
+            <p class="opt _optInterior">Interior: Leather</p>
+        </body></html>
+        """)
+
+    def test_join_and_concat(self):
+        assert self.cs.select(-1, "css:.crumbs a >> join(' / ')") == "Home / Cars / Civic"
+        assert self.cs.select(-1, "css:.crumbs a >> concat('-')") == "Home-Cars-Civic"
+        assert self.cs.select(-1, "css:.crumbs a >> join()") == "HomeCarsCivic"
+        assert self.cs.select(-1, "css:.crumbs a >> uppercase() >> join('>')") == "HOME>CARS>CIVIC"
+
+    def test_translate(self):
+        assert self.cs.select(0, "css:.price >> translate('$,','')") == "1299.00"
+
+    def test_regex_replace(self):
+        assert self.cs.select(0, "css:.mileage >> regex-replace('[^0-9]','')") == "12345"
+
+    def test_regex_extract(self):
+        assert self.cs.select(0, "css:.vinline >> regex-extract('([A-HJ-NPR-Z0-9]{17})')") == "1HGFE2F59PA000001"
+        assert self.cs.select(0, "css:.vinline >> regex-extract('[0-9]{4}')") == "0000"
+
+    def test_substring_after_last(self):
+        assert self.cs.select(0, "css:.dl >> get-attr('href') >> substring-after-last('/')") == "42"
+
+    def test_substring_before_last(self):
+        assert self.cs.select(0, "css:.file >> substring-before-last('.')") == "archive.tar"
+
+    def test_replace_with_comma_arg(self):
+        assert self.cs.select(0, "css:.price >> replace(',','')") == "$1299.00"
+
+    def test_interior_concat_via_css_join(self):
+        q = ("css:p[class*='_optInterior'] "
+             ">> replace('Interior Color:','') >> replace('Interior:','') "
+             ">> normalize-space() >> join(' ')")
+        assert self.cs.select(-1, q) == "Black Leather"
