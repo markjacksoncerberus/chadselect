@@ -60,8 +60,9 @@ pub fn process(xpath_with_functions: &str, content_item: &ContentItem) -> Vec<St
     } else if needs_deep_stack {
         evaluate_on_deep_stack(&content_item.content, raw_expr)
     } else {
-        let expr = xpath_rewrite::rewrite_positional_predicates(raw_expr);
-        xpath_eval::evaluate(&content_item.html(), &expr)
+        // Positional predicates are evaluated correctly by the (forked) xrust
+        // engine, so no expression rewriting is needed.
+        xpath_eval::evaluate(&content_item.html(), raw_expr)
     };
 
     if !text_functions.is_empty() {
@@ -71,9 +72,9 @@ pub fn process(xpath_with_functions: &str, content_item: &ContentItem) -> Vec<St
     results
 }
 
-/// Rewrite, parse, and evaluate a deeply-nested expression on a thread with a
-/// large stack — both the rewriter and xrust's parser recurse per nesting
-/// level and would overflow small (e.g. 2 MiB tokio worker) caller stacks.
+/// Parse and evaluate a deeply-nested expression on a thread with a large stack
+/// — xrust's recursive parser would otherwise overflow small (e.g. 2 MiB tokio
+/// worker) caller stacks.
 ///
 /// xrust's `Transform<ENode>` and the `ENode` handle are `!Send` (they hold an
 /// `Rc<Html>`), so the document is re-parsed inside the thread from the raw
@@ -86,9 +87,8 @@ fn evaluate_on_deep_stack(content: &str, raw_expr: &str) -> Vec<String> {
         .name("chadselect-xpath".into())
         .stack_size(DEEP_STACK_BYTES)
         .spawn(move || {
-            let expr = xpath_rewrite::rewrite_positional_predicates(&raw_expr);
             let doc = Rc::new(Html::parse_document(&content));
-            xpath_eval::evaluate(&doc, &expr)
+            xpath_eval::evaluate(&doc, &raw_expr)
         })
         .ok()
         .and_then(|handle| handle.join().ok())

@@ -43,12 +43,15 @@ fn bug_e_exact_label_then_sibling_value() {
 }
 
 #[test]
-fn bug_c_following_sibling_positional_workaround() {
+fn bug_c_following_sibling_positional() {
     let c = doc();
-    // Per-step positional on following-sibling is broken upstream in xrust:
+    // Per-step positional on the following-sibling axis (fixed in the forked
+    // xrust engine — the canonical label/value table idiom):
     assert_eq!(c.query(-1, "xpath://span[text()='VIN']/following-sibling::span[1]"),
-               Vec::<String>::new(), "if this changes, xrust may have fixed BUG C");
-    // The parenthesized node-set-index form is the correct workaround:
+               vec!["WP0AB2A90SS225386"]);
+    assert_eq!(c.query(-1, "xpath://span[text()='VIN']/following-sibling::span[position()=1]"),
+               vec!["WP0AB2A90SS225386"]);
+    // The parenthesized node-set-index form also works:
     assert_eq!(c.query(-1, "xpath:(//span[text()='VIN']/following-sibling::span)[1]"),
                vec!["WP0AB2A90SS225386"]);
 }
