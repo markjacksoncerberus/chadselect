@@ -8,7 +8,7 @@ Available as a **Rust crate** and a **Python package** — same API, same query 
 
 | Package | Install | Engines |
 |---------|---------|---------|
-| [**chadselect** (Rust)](chadselect-rs/) | `cargo add chadselect` | regex, xrust, scraper, jmespath |
+| [**chadselect** (Rust)](chadselect-rs/) | `cargo add chadselect` | regex, chadpath, scraper, jmespath |
 | [**chadselect** (Python)](chadselect-py/) | `pip install chadselect` | re, lxml, selectolax, jmespath |
 
 ---
@@ -83,7 +83,7 @@ price = cs.select(0, "css:.price")
 
 ```toml
 [dependencies]
-chadselect = "0.3.2"
+chadselect = "0.3.3"
 ```
 
 ```rust

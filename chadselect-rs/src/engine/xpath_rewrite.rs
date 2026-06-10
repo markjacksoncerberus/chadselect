@@ -1,11 +1,11 @@
 //! XPath expression analysis used to keep the recursive parser off small stacks.
 //!
-//! xrust's parser-combinators recurse ~one frame per nested predicate /
+//! chadpath's parser-combinators recurse ~one frame per nested predicate /
 //! function-arg level, overflowing small stacks (e.g. a 2 MiB tokio worker) at
 //! ~15 levels. [`nesting_depth`] lets the caller route deep expressions to a
 //! large-stack thread instead of crashing the process.
 //!
-//! (Positional-predicate rewriting used to live here too, but the forked xrust
+//! (Positional-predicate rewriting used to live here too, but the forked chadpath
 //! engine now evaluates positional predicates correctly, so it was removed.)
 
 /// Maximum simultaneous nesting depth of `(` and `[` (outside string literals).

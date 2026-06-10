@@ -1,4 +1,4 @@
-//! XPath 1.0 evaluation over the shared `scraper` DOM, via `xrust` and the
+//! XPath 1.0 evaluation over the shared `scraper` DOM, via `chadpath` and the
 //! [`ENode`](crate::engine::xnode::ENode) adapter. No second parse occurs — the
 //! same html5ever `ego-tree` the CSS engine builds is queried directly.
 
@@ -7,18 +7,18 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use scraper::Html;
-use xrust::item::{Item, Node};
-use xrust::parser::xpath::parse;
-use xrust::transform::context::{ContextBuilder, StaticContextBuilder};
-use xrust::transform::Transform;
-use xrust::xdmerror::{Error, ErrorKind};
+use chadpath::item::{Item, Node};
+use chadpath::parser::xpath::parse;
+use chadpath::transform::context::{ContextBuilder, StaticContextBuilder};
+use chadpath::transform::Transform;
+use chadpath::xdmerror::{Error, ErrorKind};
 
 use crate::engine::xnode::ENode;
 
 thread_local! {
     /// Cache of compiled XPath expressions, keyed by the expression string.
     ///
-    /// xrust's recursive-descent parser is the dominant cost (~5× evaluation),
+    /// chadpath's recursive-descent parser is the dominant cost (~5× evaluation),
     /// and a crawler runs the same handful of selectors across many documents.
     /// Compiling once per distinct expression (per thread) turns that into a
     /// one-time cost. The compiled `Transform` is document-independent, so it is

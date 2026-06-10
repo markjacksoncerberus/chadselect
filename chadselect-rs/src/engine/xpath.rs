@@ -1,7 +1,7 @@
 //! XPath 1.0 extraction engine.
 //!
 //! Evaluates XPath expressions over the **shared** `scraper`/html5ever document
-//! (the same DOM the CSS engine uses) via `xrust` and the
+//! (the same DOM the CSS engine uses) via `chadpath` and the
 //! [`ENode`](crate::engine::xnode::ENode) adapter. The previous `sxd_html`
 //! backend was replaced because its tree-build was quadratic in memory and time
 //! on real-world and adversarial HTML.
@@ -15,8 +15,7 @@ use crate::content::ContentItem;
 use crate::engine::{xpath_eval, xpath_rewrite};
 use crate::functions;
 
-/// Below this nesting depth an expression is parsed inline on the caller's
-/// Inline-parse threshold for *nesting depth*. xrust's recursive-descent parser
+/// Inline-parse threshold for *nesting depth*. chadpath's recursive-descent parser
 /// uses stack proportional to both nesting depth and overall expression
 /// length/structure, and debug frames are several× fatter than release — so the
 /// inline budget is tighter in debug builds. Anything above goes to a
@@ -24,7 +23,7 @@ use crate::functions;
 const INLINE_SAFE_DEPTH: usize = if cfg!(debug_assertions) { 4 } else { 8 };
 
 /// Inline-parse threshold for raw expression *length*. Long-but-shallow
-/// selectors still recurse deeply in xrust (the parser recurses per step /
+/// selectors still recurse deeply in chadpath (the parser recurses per step /
 /// operator, not just per bracket), so length is a second, independent trigger.
 const INLINE_SAFE_LEN: usize = if cfg!(debug_assertions) { 96 } else { 384 };
 
@@ -48,7 +47,7 @@ pub fn process(xpath_with_functions: &str, content_item: &ContentItem) -> Vec<St
     let depth = xpath_rewrite::nesting_depth(raw_expr);
 
     // Route to a large-stack thread when the expression is deeply nested OR
-    // long enough that xrust's recursion could overflow the caller's stack.
+    // long enough that chadpath's recursion could overflow the caller's stack.
     let needs_deep_stack = depth > INLINE_SAFE_DEPTH || raw_expr.len() > INLINE_SAFE_LEN;
 
     let mut results = if depth > MAX_QUERY_DEPTH {
@@ -60,7 +59,7 @@ pub fn process(xpath_with_functions: &str, content_item: &ContentItem) -> Vec<St
     } else if needs_deep_stack {
         evaluate_on_deep_stack(&content_item.content, raw_expr)
     } else {
-        // Positional predicates are evaluated correctly by the (forked) xrust
+        // Positional predicates are evaluated correctly by the (forked) chadpath
         // engine, so no expression rewriting is needed.
         xpath_eval::evaluate(&content_item.html(), raw_expr)
     };
@@ -73,10 +72,10 @@ pub fn process(xpath_with_functions: &str, content_item: &ContentItem) -> Vec<St
 }
 
 /// Parse and evaluate a deeply-nested expression on a thread with a large stack
-/// — xrust's recursive parser would otherwise overflow small (e.g. 2 MiB tokio
+/// — chadpath's recursive parser would otherwise overflow small (e.g. 2 MiB tokio
 /// worker) caller stacks.
 ///
-/// xrust's `Transform<ENode>` and the `ENode` handle are `!Send` (they hold an
+/// chadpath's `Transform<ENode>` and the `ENode` handle are `!Send` (they hold an
 /// `Rc<Html>`), so the document is re-parsed inside the thread from the raw
 /// content (`String` is `Send`). The extra parse only affects pathologically
 /// deep expressions, which are rare.
