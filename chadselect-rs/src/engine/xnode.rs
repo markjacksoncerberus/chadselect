@@ -1,7 +1,7 @@
 //! XPath-over-`scraper` adapter.
 //!
 //! This bridges the `scraper`/`html5ever` `ego-tree` DOM (the same tree the CSS
-//! engine uses) to `xrust`'s generic [`Node`] trait, so XPath 1.0 can be
+//! engine uses) to `chadpath`'s generic [`Node`] trait, so XPath 1.0 can be
 //! evaluated over a document **parsed once** by html5ever — no second parse, no
 //! conversion to a separate DOM. This replaces the `sxd_html`/`sxd-document`
 //! XPath path, whose tree-build was quadratic in memory and time.
@@ -24,12 +24,12 @@ use scraper::node::Node as SNode;
 use scraper::Html;
 
 use qualname::{NamespacePrefix, NamespaceUri, NcName, QName};
-use xrust::item::{Node, NodeType};
-use xrust::output::OutputDefinition;
-use xrust::validators::{Schema, ValidationError};
-use xrust::value::Value;
-use xrust::xdmerror::{Error, ErrorKind};
-use xrust::xmldecl::{XMLDecl, XMLDeclBuilder, DTD};
+use chadpath::item::{Node, NodeType};
+use chadpath::output::OutputDefinition;
+use chadpath::validators::{Schema, ValidationError};
+use chadpath::value::Value;
+use chadpath::xdmerror::{Error, ErrorKind};
+use chadpath::xmldecl::{XMLDecl, XMLDeclBuilder, DTD};
 
 /// A locator into the shared `Html` tree.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -43,7 +43,7 @@ enum Loc {
 
 /// Pre-order rank of every node, so document-order comparisons are O(1).
 /// Without this, `cmp_document_order` would re-walk to the root per call and
-/// xrust's per-step nodeset sort would become O(n²).
+/// chadpath's per-step nodeset sort would become O(n²).
 type OrderMap = HashMap<NodeId, u32>;
 
 /// Assign each node a pre-order (document-order) rank in a single pass.
@@ -146,7 +146,7 @@ thread_local! {
     ///
     /// qualname's string interner takes a global write-lock and linear-scans a
     /// Vec on *every* `NcName::try_from` (~58µs/call, even for a repeated
-    /// string). `name()` is called once per node xrust visits, so without this
+    /// string). `name()` is called once per node chadpath visits, so without this
     /// a single `//x` query over an N-element document costs N lock+scan ops —
     /// seconds for large pages. Element/attribute names are few and repeat
     /// heavily, so memoizing collapses it to O(distinct names).

@@ -51,7 +51,7 @@ impl ContentItem {
     /// Get the shared, lazily-parsed HTML document, parsing it on first use.
     ///
     /// Both the CSS engine (`scraper` selectors) and the XPath engine (via the
-    /// `xrust` adapter) call this, so a document is parsed by html5ever **once**
+    /// `chadpath` adapter) call this, so a document is parsed by html5ever **once**
     /// regardless of how many or which kinds of queries run against it.
     pub(crate) fn html(&self) -> Rc<Html> {
         let mut doc = self.html_document.borrow_mut();
