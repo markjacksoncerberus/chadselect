@@ -25,7 +25,9 @@ logger = logging.getLogger(__name__)
 # Matches  :pseudo-name('argument')  (with optional trailing selectors)
 _PSEUDO_RE = _re.compile(
     r":(?P<pseudo>has-text|contains-text|text-equals|text-starts|text-ends)"
-    r"\(['\"](?P<arg>[^'\"]*)['\"]\)"
+    # Argument may be single-quoted, double-quoted, or unquoted (matching the
+    # Rust crate, which accepts `:has-text(VIN)` as well as `:has-text('VIN')`).
+    r"\(\s*(?:'(?P<sq>[^']*)'|\"(?P<dq>[^\"]*)\"|(?P<uq>[^)]*?))\s*\)"
 )
 
 
@@ -39,7 +41,12 @@ def _extract_pseudo(selector: str) -> Tuple[str, Optional[str], Optional[str], s
         return selector, None, None, ""
     base = selector[: m.start()]
     trailing = selector[m.end() :].strip()  # e.g. " .value"
-    return base, m.group("pseudo"), m.group("arg"), trailing
+    arg = m.group("sq")
+    if arg is None:
+        arg = m.group("dq")
+    if arg is None:
+        arg = m.group("uq") or ""
+    return base, m.group("pseudo"), arg, trailing
 
 
 def _node_text(node: Node) -> str:
@@ -60,6 +67,44 @@ def _matches_pseudo(node: Node, pseudo: str, arg: str) -> bool:
     if pseudo == "text-ends":
         return text.endswith(arg)
     return False
+
+
+def _next_element(node: Node) -> Optional[Node]:
+    """Next *element* sibling, skipping text/comment nodes."""
+    n = node.next
+    while n is not None and (n.tag is None or n.tag.startswith("-")):
+        n = n.next
+    return n
+
+
+def _apply_post(node: Node, post: str) -> List[Node]:
+    """Apply a post-selector relative to a text-matched node, honouring a
+    leading combinator (``+`` adjacent sibling, ``~`` following siblings,
+    ``>`` children); otherwise treat it as a descendant selector."""
+    post = post.strip()
+    if not post:
+        return [node]
+    combinator = post[0] if post[0] in "+~>" else " "
+    rest = post[1:].strip() if combinator != " " else post
+    if combinator != " " and not rest:
+        return []
+    try:
+        if combinator == "+":
+            sib = _next_element(node)
+            return [sib] if sib is not None and sib.css_matches(rest) else []
+        if combinator == "~":
+            out: List[Node] = []
+            sib = _next_element(node)
+            while sib is not None:
+                if sib.css_matches(rest):
+                    out.append(sib)
+                sib = _next_element(sib)
+            return out
+        if combinator == ">":
+            return [c for c in node.iter(include_text=False) if c.css_matches(rest)]
+        return list(node.css(post))  # descendant
+    except Exception:
+        return []
 
 
 def process(selector_with_functions: str, html: str) -> List[str]:
@@ -86,11 +131,9 @@ def process(selector_with_functions: str, html: str) -> List[str]:
         for node in candidates:
             if _matches_pseudo(node, pseudo, pseudo_arg):  # type: ignore[arg-type]
                 if trailing:
-                    # e.g. ":has-text('Exterior:') .value" — query inside
-                    try:
-                        matched_nodes.extend(node.css(trailing))
-                    except Exception:
-                        pass
+                    # e.g. ":has-text('Exterior:') .value" (descendant), or a
+                    # combinator like ":text-equals('X') + span" (sibling).
+                    matched_nodes.extend(_apply_post(node, trailing))
                 else:
                     matched_nodes.append(node)
         nodes = matched_nodes

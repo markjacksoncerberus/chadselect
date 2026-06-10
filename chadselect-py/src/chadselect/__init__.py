@@ -37,4 +37,4 @@ __all__ = [
     "parse_query",
     "supported_text_functions",
 ]
-__version__ = "0.3.1"
+__version__ = "0.3.2"

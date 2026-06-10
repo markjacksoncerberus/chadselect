@@ -4,8 +4,10 @@
 //! Supports standard CSS selectors, custom text pseudo-selectors for
 //! content-based filtering, and post-processing text functions.
 
+use std::collections::HashSet;
+
 use log::warn;
-use scraper::Selector;
+use scraper::{ElementRef, Html, Selector};
 
 use crate::content::ContentItem;
 use crate::functions::{self, TextFunction};
@@ -228,29 +230,12 @@ fn process_with_text_selectors(
         base_elements
     };
 
-    // Stage 3: Apply post-selector to descendants.
-    let final_elements = if !parsed.post_selector.is_empty() {
-        let mut final_candidates = Vec::new();
-        for element in filtered_elements {
-            match Selector::parse(&parsed.post_selector) {
-                Ok(post_selector) => {
-                    for descendant in element.select(&post_selector) {
-                        final_candidates.push(descendant);
-                    }
-                }
-                Err(e) => {
-                    warn!(
-                        "Invalid post CSS selector '{}': {:?}",
-                        parsed.post_selector, e
-                    );
-                    return vec![];
-                }
-            }
-        }
-        final_candidates
-    } else {
-        filtered_elements
-    };
+    // Stage 3: Apply the post-selector relative to the text-matched elements.
+    // Supports a descendant post (default) plus the `+`, `~`, and `>`
+    // combinators — so idioms like `span:text-equals(Label) + span` work
+    // (previously the post was descendant-only and a leading combinator was
+    // silently dropped, returning nothing).
+    let final_elements = apply_post_selector(&html_doc, filtered_elements, &parsed.post_selector);
 
     // Extract text from final elements.
     let mut results: Vec<String> = final_elements
@@ -271,6 +256,70 @@ fn process_with_text_selectors(
     }
 
     results
+}
+
+/// Apply a post-selector to the text-matched elements, honouring a leading
+/// combinator. With no leading combinator the post is treated as a descendant
+/// selector (the historical behaviour); `+`/`~`/`>` navigate to the adjacent
+/// sibling / following siblings / children of each matched element.
+///
+/// Combinator cases select the post compound globally and keep candidates whose
+/// relationship target is one of the matched elements — so the post selector
+/// (`rest`) can be any compound scraper understands.
+fn apply_post_selector<'a>(
+    doc: &'a Html,
+    matched: Vec<ElementRef<'a>>,
+    post: &str,
+) -> Vec<ElementRef<'a>> {
+    let post = post.trim();
+    if post.is_empty() {
+        return matched;
+    }
+
+    let (combinator, rest) = match post.chars().next() {
+        Some('+') => ('+', post[1..].trim()),
+        Some('~') => ('~', post[1..].trim()),
+        Some('>') => ('>', post[1..].trim()),
+        _ => (' ', post), // descendant
+    };
+
+    let selector = match Selector::parse(rest) {
+        Ok(s) => s,
+        Err(e) => {
+            warn!("Invalid post CSS selector '{}': {:?}", rest, e);
+            return Vec::new();
+        }
+    };
+
+    // Descendant post: keep the per-matched-element selection (unchanged).
+    if combinator == ' ' {
+        return matched
+            .iter()
+            .flat_map(|el| el.select(&selector))
+            .collect();
+    }
+
+    let matched_ids: HashSet<_> = matched.iter().map(|e| e.id()).collect();
+    doc.select(&selector)
+        .filter(|cand| match combinator {
+            // Immediate previous element sibling is a matched element.
+            '+' => cand
+                .prev_siblings()
+                .find_map(ElementRef::wrap)
+                .is_some_and(|p| matched_ids.contains(&p.id())),
+            // Some previous element sibling is a matched element.
+            '~' => cand
+                .prev_siblings()
+                .filter_map(ElementRef::wrap)
+                .any(|p| matched_ids.contains(&p.id())),
+            // Parent element is a matched element.
+            '>' => cand
+                .parent()
+                .and_then(ElementRef::wrap)
+                .is_some_and(|p| matched_ids.contains(&p.id())),
+            _ => false,
+        })
+        .collect()
 }
 
 // ─── Element-text caching ───────────────────────────────────────────────────

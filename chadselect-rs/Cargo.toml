@@ -1,6 +1,6 @@
 [package]
 name = "chadselect"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2021"
 description = "Unified data extraction — Regex, XPath 1.0, CSS Selectors, and JMESPath behind one query interface"
 license = "MIT"
@@ -15,7 +15,10 @@ serde_json = "1"
 scraper = "0.21"
 jmespath = "0.3"
 log = "0.4"
-xrust = { version = "2.1.0", default-features = false }
+# chadpath: our Apache-2.0 fork of xrust with the XPath positional-predicate
+# correctness fixes and parser performance work. Imported as `xrust` (the fork
+# keeps that lib name) so engine code is unchanged.
+xrust = { package = "chadpath", version = "0.1.0", default-features = false }
 ego-tree = "0.9"
 qualname = "0.0.1"
 
