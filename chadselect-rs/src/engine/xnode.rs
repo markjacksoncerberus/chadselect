@@ -23,7 +23,7 @@ use ego_tree::NodeId;
 use scraper::node::Node as SNode;
 use scraper::Html;
 
-use qualname::{NamespacePrefix, NamespaceUri, NcName, QName};
+use chadpath::names::{NamespacePrefix, NamespaceUri, NcName, QName};
 use chadpath::item::{Node, NodeType};
 use chadpath::output::OutputDefinition;
 use chadpath::validators::{Schema, ValidationError};
@@ -303,12 +303,17 @@ fn err(msg: &str) -> Error {
 thread_local! {
     /// Memoize `QName` construction keyed by local name.
     ///
-    /// qualname's string interner takes a global write-lock and linear-scans a
-    /// Vec on *every* `NcName::try_from` (~58µs/call, even for a repeated
-    /// string). `name()` is called once per node chadpath visits, so without this
-    /// a single `//x` query over an N-element document costs N lock+scan ops —
-    /// seconds for large pages. Element/attribute names are few and repeat
-    /// heavily, so memoizing collapses it to O(distinct names).
+    /// `name()` is called once per node chadpath visits, so a `//x` query over an
+    /// N-element document resolves N names. Without this cache each call would
+    /// re-validate the name (`NcName::try_from`) and allocate a fresh `QName`;
+    /// caching collapses that to O(distinct names), after which a `name()` call is
+    /// just a cheap `QName` clone (shared `Arc<str>`, no allocation, no validation).
+    ///
+    /// (Historically this also rescued the engine from `chadpath::names`'s
+    /// predecessor — the upstream `qualname` crate, whose interner took a global
+    /// write-lock and linear-scanned a Vec on *every* `NcName::try_from`,
+    /// ~58µs/call. chadpath 0.3.3 replaced that with a lock-free `Arc<str>` name
+    /// type, so the cache is now a constant-factor win, not a catastrophe-avoider.)
     static QNAME_MEMO: RefCell<HashMap<String, Option<QName>>> = RefCell::new(HashMap::new());
 }
 
@@ -747,9 +752,11 @@ mod tests {
 
     #[test]
     fn many_elements_is_fast() {
-        // Guards the qualname-interner hotspot: name() is memoized, so a query
+        // Guards the name-resolution hot path: name() is memoized, so a query
         // over a document with thousands of elements stays sub-second. Without
-        // the QNAME_MEMO cache this took ~15s.
+        // the QNAME_MEMO cache this took ~15s against the old global-locked
+        // qualname interner; chadpath::names is lock-free now, but the cache
+        // still earns its keep by avoiding per-node validation + allocation.
         let mut html = String::from("<html><body><div>");
         for _ in 0..20_000 {
             html.push_str("<span>x</span>");

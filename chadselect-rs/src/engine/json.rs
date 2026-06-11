@@ -1,7 +1,10 @@
 //! JMESPath extraction engine.
 //!
-//! Processes JMESPath expressions against JSON content with lazy caching
-//! of the parsed `serde_json::Value`.
+//! Processes JMESPath expressions against JSON content. The document is parsed
+//! into a JMESPath value tree (`Rc<Variable>`) once and cached per document
+//! (see [`ContentItem::jmespath_value`]); compiled expressions are cached per
+//! thread. Every query then evaluates against the cached tree without
+//! re-converting the document.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -14,8 +17,8 @@ use crate::content::ContentItem;
 thread_local! {
     /// Cache of compiled JMESPath expressions, keyed by the expression string.
     ///
-    /// `jmespath::compile` parses the expression on every call; the parsed JSON
-    /// *value* was already cached per document, but the *expression* was
+    /// `jmespath::compile` parses the expression on every call; the converted
+    /// document tree is already cached per document, but the *expression* was
     /// recompiled per query (a flat slice of fleet CPU). The crawler runs the
     /// same expressions across many documents, so compiling once per distinct
     /// expression (per thread) removes that. `Expression<'static>` is `Clone`
@@ -46,16 +49,21 @@ fn compiled(path: &str) -> Option<Expression<'static>> {
 
 /// Process a JMESPath expression against a content item, returning matches.
 ///
-/// The parsed JSON value is cached on the [`ContentItem`] for reuse across
-/// multiple queries against the same document.
+/// The document is parsed into a JMESPath value tree (`Rc<Variable>`) **once**
+/// and cached on the [`ContentItem`]; every query then evaluates against the
+/// cached tree via [`Expression::search_cached`]. This is the key allocation
+/// win: upstream `Expression::search` re-converts the whole document into a
+/// fresh `Rc<Variable>` tree on *every* call (a full serde walk — the dominant
+/// allocation source on JSON-heavy pages). Caching the converted tree collapses
+/// that to a single conversion per document, shared by reference across queries.
 pub fn process(path: &str, content_item: &ContentItem) -> Vec<String> {
-    let mut json_value_ref = content_item.json_value.borrow_mut();
+    let mut jmespath_ref = content_item.jmespath_value.borrow_mut();
 
-    if json_value_ref.is_none() {
-        match serde_json::from_str(&content_item.content) {
-            Ok(value) => {
-                *json_value_ref = Some(value);
-            }
+    if jmespath_ref.is_none() {
+        // Parse the raw content straight into the JMESPath tree (one serde pass),
+        // skipping the intermediate `serde_json::Value` entirely.
+        match jmespath::Variable::from_json(&content_item.content) {
+            Ok(var) => *jmespath_ref = Some(jmespath::Rcvar::new(var)),
             Err(e) => {
                 warn!("Failed to parse JSON content: {}", e);
                 return vec![];
@@ -63,8 +71,8 @@ pub fn process(path: &str, content_item: &ContentItem) -> Vec<String> {
         }
     }
 
-    let Some(json_value) = json_value_ref.as_ref() else {
-        warn!("Failed to access cached JSON value");
+    let Some(data) = jmespath_ref.as_ref() else {
+        warn!("Failed to access cached JMESPath value");
         return vec![];
     };
 
@@ -73,7 +81,7 @@ pub fn process(path: &str, content_item: &ContentItem) -> Vec<String> {
         None => return vec![],
     };
 
-    let result = match expression.search(json_value) {
+    let result = match expression.search_cached(data) {
         Ok(value) => value,
         Err(e) => {
             warn!("JMESPath execution failed: {}", e);

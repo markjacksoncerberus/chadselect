@@ -1,6 +1,6 @@
 [package]
 name = "chadselect"
-version = "0.4.3"
+version = "0.4.4"
 edition = "2021"
 description = "Unified data extraction — Regex, XPath 1.0, CSS Selectors, and JMESPath behind one query interface"
 license = "MIT"
@@ -13,17 +13,21 @@ categories = ["parsing", "web-programming"]
 regex = "1"
 serde_json = "1"
 scraper = "0.21"
-jmespath = "0.3"
+# chadmespath: our MIT fork of jmespath 0.3. It adds `Expression::search_cached`,
+# letting the `json:` engine convert a document into the JMESPath value tree once
+# (cached on the ContentItem) instead of re-converting it on every query — the
+# dominant allocation source on JSON-heavy pages. Imported under the local alias
+# `jmespath` so engine code is unchanged.
+jmespath = { package = "chadmespath", version = "0.3.0" }
 log = "0.4"
 # chadpath: our Apache-2.0 fork of xrust. 0.3.0 added the O(n²)→O(n) predicate-
 # filter fix plus the numeric/relational/boolean/string-length conformance fixes;
 # 0.3.1 adds the `*`-wildcard NameTest fast-path; 0.3.2 cuts the per-query
-# allocation churn on the XPath evaluation path (in-place Context evolution +
-# fewer/cheaper Context clones — see tests/alloc_attribution.rs and the engine
-# notes in MEMORY.md).
-chadpath = { version = "0.3.2", default-features = false }
+# allocation churn on the XPath evaluation path; 0.3.3 replaces the upstream
+# `qualname` crate with an internal, lock-free name type (`chadpath::names`),
+# removing the process-global RwLock that every name test took on clone/drop.
+chadpath = { version = "0.3.3", default-features = false }
 ego-tree = "0.9"
-qualname = "0.0.1"
 
 [dev-dependencies]
 env_logger = "0.11"

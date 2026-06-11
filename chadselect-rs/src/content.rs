@@ -1,7 +1,6 @@
 //! Content types and content item storage with lazy-parsed caching.
 
 use scraper::Html;
-use serde_json::Value;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -29,8 +28,14 @@ pub struct ContentItem {
     pub content: String,
     /// Declared content type.
     pub content_type: ContentType,
-    /// Lazily parsed JSON value.
-    pub(crate) json_value: RefCell<Option<Value>>,
+    /// Lazily built JMESPath value tree (`Rc<jmespath::Variable>`), cached **per
+    /// document**. `jmespath::Expression::search` converts its input into this
+    /// tree on *every* call; the conversion is a full serde walk of the whole
+    /// document (one `Rc` + `String` + BTree node per value). Building it once
+    /// here and evaluating every `json:` selector against the cached tree (via
+    /// `search_cached`) removes that per-query whole-document conversion — the
+    /// dominant allocation source on JSON-heavy pages.
+    pub(crate) jmespath_value: RefCell<Option<jmespath::Rcvar>>,
     /// Lazily parsed HTML document (via `scraper`/html5ever), **shared** by
     /// both the CSS and XPath engines — the HTML is parsed exactly once.
     pub(crate) html_document: RefCell<Option<Rc<Html>>>,
@@ -50,7 +55,7 @@ impl ContentItem {
         Self {
             content,
             content_type,
-            json_value: RefCell::new(None),
+            jmespath_value: RefCell::new(None),
             html_document: RefCell::new(None),
             html_order: RefCell::new(None),
             element_text_cache: RefCell::new(HashMap::new()),
