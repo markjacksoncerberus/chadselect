@@ -145,10 +145,6 @@ impl ENode {
         }
     }
 
-    fn collect(v: Vec<ENode>) -> Box<dyn Iterator<Item = ENode>> {
-        Box::new(v.into_iter())
-    }
-
     /// Construct a sibling/parent-chain iterator that walks `id → step(id) → …`
     /// lazily, yielding owned `ENode`s without materialising a `Vec`. `step`
     /// returns the next node id in the chain (or `None` to stop).
@@ -156,19 +152,105 @@ impl ENode {
         &self,
         first: Option<NodeId>,
         step: fn(&Html, NodeId) -> Option<NodeId>,
-    ) -> Box<dyn Iterator<Item = ENode>> {
-        let doc = self.doc.clone();
-        let order = self.order.clone();
-        let mut next = first;
-        Box::new(std::iter::from_fn(move || {
-            let id = next?;
-            next = step(&doc, id);
-            Some(ENode {
-                doc: doc.clone(),
-                order: order.clone(),
-                loc: Loc::Node(id),
-            })
-        }))
+    ) -> ENodeIter {
+        ENodeIter::Chain {
+            doc: self.doc.clone(),
+            order: self.order.clone(),
+            next: first,
+            step,
+        }
+    }
+}
+
+/// Concrete axis iterator for [`ENode`], used as `Node::NodeIterator`.
+///
+/// chadpath only needs the axis iterators to implement `Iterator`, not to be
+/// trait objects — so returning a concrete enum instead of `Box<dyn Iterator>`
+/// removes a heap allocation from **every** axis call. The XPath engine makes
+/// millions of these (`child_iter`/`descend_iter`/`attribute_iter` fire once per
+/// visited node on a `//`-sweep), so the boxes were a measurable slice of the
+/// per-query allocation churn.
+pub enum ENodeIter {
+    /// Exhausted / no nodes.
+    Empty,
+    /// A `next-id` chain: child (first child then next-sibling), ancestors,
+    /// or following/preceding siblings.
+    Chain {
+        doc: Rc<Html>,
+        order: Rc<OrderMap>,
+        next: Option<NodeId>,
+        step: fn(&Html, NodeId) -> Option<NodeId>,
+    },
+    /// Pre-order descendant walk bounded to `root`'s subtree (excludes `root`).
+    Preorder {
+        doc: Rc<Html>,
+        order: Rc<OrderMap>,
+        next: Option<NodeId>,
+        root: NodeId,
+    },
+    /// The synthetic attribute nodes (slots `idx..count`) of `owner`.
+    Attr {
+        doc: Rc<Html>,
+        order: Rc<OrderMap>,
+        owner: NodeId,
+        idx: usize,
+        count: usize,
+    },
+}
+
+impl Iterator for ENodeIter {
+    type Item = ENode;
+
+    fn next(&mut self) -> Option<ENode> {
+        match self {
+            ENodeIter::Empty => None,
+            ENodeIter::Chain {
+                doc,
+                order,
+                next,
+                step,
+            } => {
+                let id = (*next)?;
+                *next = step(doc, id);
+                Some(ENode {
+                    doc: doc.clone(),
+                    order: order.clone(),
+                    loc: Loc::Node(id),
+                })
+            }
+            ENodeIter::Preorder {
+                doc,
+                order,
+                next,
+                root,
+            } => {
+                let id = (*next)?;
+                *next = preorder_next_within(doc, id, *root);
+                Some(ENode {
+                    doc: doc.clone(),
+                    order: order.clone(),
+                    loc: Loc::Node(id),
+                })
+            }
+            ENodeIter::Attr {
+                doc,
+                order,
+                owner,
+                idx,
+                count,
+            } => {
+                if *idx >= *count {
+                    return None;
+                }
+                let i = *idx;
+                *idx += 1;
+                Some(ENode {
+                    doc: doc.clone(),
+                    order: order.clone(),
+                    loc: Loc::Attr { owner: *owner, idx: i },
+                })
+            }
+        }
     }
 }
 
@@ -243,7 +325,7 @@ fn local_qname(local: &str) -> Option<QName> {
 }
 
 impl Node for ENode {
-    type NodeIterator = Box<dyn Iterator<Item = ENode>>;
+    type NodeIterator = ENodeIter;
 
     // ── Construction (only new_document is real; used for result documents) ──
 
@@ -403,21 +485,16 @@ impl Node for ENode {
         // Lazy pre-order traversal bounded to this node's subtree (excludes
         // self). For `//` this is the whole-document walk, so not buffering all
         // N nodes into a Vec up front is the biggest single allocation saving.
-        let (doc, order) = (self.doc.clone(), self.order.clone());
         let root = match self.loc {
             Loc::Node(id) => id,
-            Loc::Attr { .. } => return ENode::collect(Vec::new()),
+            Loc::Attr { .. } => return ENodeIter::Empty,
         };
-        let mut next = first_child_id(&doc, root);
-        Box::new(std::iter::from_fn(move || {
-            let id = next?;
-            next = preorder_next_within(&doc, id, root);
-            Some(ENode {
-                doc: doc.clone(),
-                order: order.clone(),
-                loc: Loc::Node(id),
-            })
-        }))
+        ENodeIter::Preorder {
+            doc: self.doc.clone(),
+            order: self.order.clone(),
+            next: first_child_id(&self.doc, root),
+            root,
+        }
     }
 
     fn next_iter(&self) -> Self::NodeIterator {
@@ -437,25 +514,24 @@ impl Node for ENode {
     }
 
     fn attribute_iter(&self) -> Self::NodeIterator {
-        let mut v = Vec::new();
         if let Loc::Node(id) = self.loc {
             if let Some(nref) = self.doc.tree.get(id) {
                 if let SNode::Element(el) = nref.value() {
-                    for idx in 0..el.attrs().count() {
-                        v.push(ENode {
-                            doc: self.doc.clone(),
-                            order: self.order.clone(),
-                            loc: Loc::Attr { owner: id, idx },
-                        });
-                    }
+                    return ENodeIter::Attr {
+                        doc: self.doc.clone(),
+                        order: self.order.clone(),
+                        owner: id,
+                        idx: 0,
+                        count: el.attrs().count(),
+                    };
                 }
             }
         }
-        ENode::collect(v)
+        ENodeIter::Empty
     }
 
     fn namespace_iter(&self) -> Self::NodeIterator {
-        ENode::collect(vec![])
+        ENodeIter::Empty
     }
 
     fn get_attribute(&self, a: &QName) -> Rc<Value> {

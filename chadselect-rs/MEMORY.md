@@ -94,6 +94,60 @@ HTML, not of the XPath engine.
 - **`element_text_cache`** (CSS text pseudo-selectors) plateaus (~4.4 MB on a
   256 KB doc) and is not a leak.
 
+## Per-query allocation churn (distinct from residency — fixed in 0.4.3)
+
+The harness above measures **retained bytes** with **non-matching** selectors, so
+it deliberately isolates parse/DOM cost and never sees per-query churn. A
+separate failure mode surfaced from a consumer's per-extraction allocation guard:
+one `extract_vehicle_data` over a 580 KiB VDP made **~425k short-lived
+allocations / ~61 MiB**. Attribution (`tests/alloc_attribution.rs`) showed:
+
+- The DOM build is **~1.6%** of that — parsing is cheap. The churn is per-query.
+- **XPath is 100–1000× more alloc-hungry per result than CSS/regex.** A
+  `//a[…]//b[…]/text()` shape allocated **~141 times per matched row**; CSS and
+  regex are ~5–8/result. ~90% of a real extraction's allocations were XPath.
+
+Root cause was structural churn in the chadpath evaluator (not the adapter):
+`compose` rebuilt the whole evaluation `Context` with `ContextBuilder::from`
+(a full deep-clone) **every path step**, and because predicates are themselves
+`compose`s evaluated **per context node**, this multiplied to tens of thousands
+of full-Context clones for a single query over a few-hundred-node page
+(33,819 clones / 200 rows in the probe). `ContextBuilder::from` also cloned the
+context sequence **twice**.
+
+### The fix (chadpath 0.3.2 + adapter), ~45% fewer allocs/row on that shape
+
+Measured on `//li[contains(@class,'spec-item')]//span[@class='value']/text()`,
+allocs **per matched row** (slope cancels fixed overhead):
+
+| change | allocs/row |
+|---|---|
+| baseline (0.4.2 / chadpath 0.3.1) | 140.8 |
+| `compose` evolves one Context in place (no per-step clone) | 108.7 |
+| `filter_seq` reuses the per-item context Vec | 105.7 |
+| predicate paths use `ctxt.clone()` not `from` (drop 2nd seq clone) | 93.6 |
+| cached `Rc<Value>` for boolean comparison results | 91.6 |
+| **adapter:** concrete (un-boxed) axis iterators (`ENodeIter`) | **77.6** |
+
+The adapter change is in `src/engine/xnode.rs`: `Node::NodeIterator` is an
+associated type (not forced to `Box<dyn>`), so `child_iter`/`descend_iter`/
+`attribute_iter`/… now return a concrete `ENodeIter` enum and no longer
+heap-allocate a `Box` per axis call. All chadpath changes are behaviour-
+preserving (full chadselect + chadpath test suites pass).
+
+`tests/alloc_attribution.rs` is the permanent guard: it asserts XPath stays
+under **95 allocs/matched row** (slope of 100→400 rows) and prints a per-engine
+attribution table in `report` mode.
+
+### Still open (CPU, not allocations)
+`ENode::name()` clones a qualname `QName` per node on every name test, and
+qualname's `UniqueString` takes a **global `RwLock` write lock on both clone and
+drop** — uncontended single-threaded, but a serialization point under the
+multi-threaded fleet. It does not heap-allocate (so it is invisible to the alloc
+guard) but is a likely contributor to the "pegs the kernel" CPU symptom. A clean
+fix would add a borrowed-name test method to the `Node` trait so name tests never
+materialize a `QName`. Not yet done.
+
 ## Notes for very large pages
 
 The XPath adapter rebuilds the document-order rank map once per `evaluate` call

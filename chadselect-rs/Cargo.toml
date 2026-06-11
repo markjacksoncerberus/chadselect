@@ -1,6 +1,6 @@
 [package]
 name = "chadselect"
-version = "0.4.2"
+version = "0.4.3"
 edition = "2021"
 description = "Unified data extraction — Regex, XPath 1.0, CSS Selectors, and JMESPath behind one query interface"
 license = "MIT"
@@ -17,9 +17,11 @@ jmespath = "0.3"
 log = "0.4"
 # chadpath: our Apache-2.0 fork of xrust. 0.3.0 added the O(n²)→O(n) predicate-
 # filter fix plus the numeric/relational/boolean/string-length conformance fixes;
-# 0.3.1 adds the `*`-wildcard NameTest fast-path (per-node allocation cut on the
-# hot `//*` sweep — see eval/).
-chadpath = { version = "0.3.1", default-features = false }
+# 0.3.1 adds the `*`-wildcard NameTest fast-path; 0.3.2 cuts the per-query
+# allocation churn on the XPath evaluation path (in-place Context evolution +
+# fewer/cheaper Context clones — see tests/alloc_attribution.rs and the engine
+# notes in MEMORY.md).
+chadpath = { version = "0.3.2", default-features = false }
 ego-tree = "0.9"
 qualname = "0.0.1"
 
