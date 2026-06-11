@@ -1,6 +1,6 @@
 [package]
 name = "chadselect"
-version = "0.3.3"
+version = "0.4.0"
 edition = "2021"
 description = "Unified data extraction — Regex, XPath 1.0, CSS Selectors, and JMESPath behind one query interface"
 license = "MIT"
@@ -15,16 +15,26 @@ serde_json = "1"
 scraper = "0.21"
 jmespath = "0.3"
 log = "0.4"
-# chadpath: our Apache-2.0 fork of xrust with the XPath positional-predicate
-# correctness fixes and parser performance work.
-chadpath = { version = "0.2.0", default-features = false }
+# chadpath: our Apache-2.0 fork of xrust. 0.3.0 adds the O(n²)→O(n) predicate-
+# filter fix plus the numeric/relational/boolean/string-length conformance fixes.
+chadpath = { version = "0.3.0", default-features = false }
 ego-tree = "0.9"
 qualname = "0.0.1"
 
 [dev-dependencies]
 env_logger = "0.11"
 criterion = { version = "0.5", features = ["html_reports"] }
+# Old XPath stack (v0.2.x) — kept as a *dev-only* dep so the comparison bench can
+# pit the retired `sxd` engine head-to-head against the current `chadpath` one.
+# Not a runtime dependency of the published crate.
+sxd_html = "0.1"
+sxd-document = "0.3"
+sxd-xpath = "0.4"
 
 [[bench]]
 name = "engine_bench"
+harness = false
+
+[[bench]]
+name = "xpath_compare"
 harness = false
