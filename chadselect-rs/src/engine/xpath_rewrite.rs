@@ -1,9 +1,15 @@
 //! XPath expression analysis used to keep the recursive parser off small stacks.
 //!
-//! chadpath's parser-combinators recurse ~one frame per nested predicate /
-//! function-arg level, overflowing small stacks (e.g. a 2 MiB tokio worker) at
-//! ~15 levels. [`nesting_depth`] lets the caller route deep expressions to a
-//! large-stack thread instead of crashing the process.
+//! chadpath's parser-combinators re-descend the whole expression grammar once
+//! per nested predicate / parenthesis / function-arg level — stack-hungry
+//! recursion that overflows a 2 MiB tokio-worker stack at ~34 nesting levels in
+//! release (~18 in debug; measured via examples/parser_depth_probe.rs). Only
+//! *nesting* drives this; path-step and operator chains are iterative `*`
+//! repetitions, so raw expression length is irrelevant.
+//!
+//! [`nesting_depth`] is computed iteratively (so it cannot itself overflow) and
+//! lets [`crate::engine::xpath`] refuse an over-nested expression *before*
+//! invoking the recursive parser, rather than risk crashing the process.
 //!
 //! (Positional-predicate rewriting used to live here too, but the forked chadpath
 //! engine now evaluates positional predicates correctly, so it was removed.)

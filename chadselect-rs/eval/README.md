@@ -84,3 +84,34 @@ single-context forward axes — no measurable gain, not worth a behaviour change
 the generic engine. The remaining heavy cost is per-node predicate *dispatch*
 over the full `//*` set; the biggest real-world lever now is anchoring
 `//*[…]` → `//tag[…]` in the crawler selectors themselves.
+
+## Compile-cache work (regex / jmespath / css)
+
+Live-fleet profiling later showed ~28% of per-VDP CPU in **regex compilation**
+(and ~13% in the `json:` path). Cause: `Regex::new`, `jmespath::compile`, and
+`Selector::parse` were called fresh on every `select()`/`query()` — recompiled
+per page, though the selectors are static (the XPath engine already cached its
+compiled `Transform`; these three never did). Confirmed **not a regression** —
+`regex.rs`/`json.rs` are byte-identical since v0.2.1; the XPath fix just promoted
+this long-standing cost to the top of the profile.
+
+Fix: a `thread_local` compiled-pattern cache in each of `regex.rs`, `json.rs`,
+`css.rs`. Measured with `examples/engine_compile_probe.rs` (replays the real
+fleet `regex:`/`css:`/`json:` selectors, fresh `ChadSelect` per page):
+
+| engine | before | after | Δ |
+|---|---:|---:|---|
+| regex | 92.2 ms/page | **10.1 ms/page** | **−89 %** |
+| css | 12.7 ms/page | 11.9 ms/page | −6 % |
+| json | 5.4 ms/page | 4.9 ms/page | −10 % |
+| total | 110.3 ms/page | **26.9 ms/page** | **−76 %** |
+
+> Run: `cargo run --release --example engine_compile_probe -- --pages 40`
+
+Regex is the whole win (it eliminates the profiled 28%). CSS/JSON compile-caching
+is real but minor — parsing was never their bottleneck. **Note:** the json
+`~13%` is *not* compile; it's the per-`search` `serde_json::Value →
+jmespath::Variable` conversion + result stringification (content-size-dependent).
+The next json win is caching the converted `Variable` on `ContentItem`, not the
+compiled expression. Non-flaky regression guards live in the in-module
+`#[cfg(test)]` tests of each engine (same pattern → one cache entry).

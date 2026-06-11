@@ -3,9 +3,46 @@
 //! Processes JMESPath expressions against JSON content with lazy caching
 //! of the parsed `serde_json::Value`.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
+
+use jmespath::Expression;
 use log::warn;
 
 use crate::content::ContentItem;
+
+thread_local! {
+    /// Cache of compiled JMESPath expressions, keyed by the expression string.
+    ///
+    /// `jmespath::compile` parses the expression on every call; the parsed JSON
+    /// *value* was already cached per document, but the *expression* was
+    /// recompiled per query (a flat slice of fleet CPU). The crawler runs the
+    /// same expressions across many documents, so compiling once per distinct
+    /// expression (per thread) removes that. `Expression<'static>` is `Clone`
+    /// (cheap — it shares the parsed AST), so we clone out of the cache. Invalid
+    /// expressions cache as `None` to avoid re-parsing / re-warning each call.
+    static COMPILED: RefCell<HashMap<String, Option<Expression<'static>>>> =
+        RefCell::new(HashMap::new());
+}
+
+/// Compile `path` (or fetch the cached `Expression`). Returns `None` for an
+/// invalid expression, warning once on first compile.
+fn compiled(path: &str) -> Option<Expression<'static>> {
+    COMPILED.with(|c| {
+        if let Some(e) = c.borrow().get(path) {
+            return e.clone();
+        }
+        let compiled = match jmespath::compile(path) {
+            Ok(expr) => Some(expr),
+            Err(e) => {
+                warn!("Invalid JMESPath expression '{}': {}", path, e);
+                None
+            }
+        };
+        c.borrow_mut().insert(path.to_string(), compiled.clone());
+        compiled
+    })
+}
 
 /// Process a JMESPath expression against a content item, returning matches.
 ///
@@ -31,12 +68,9 @@ pub fn process(path: &str, content_item: &ContentItem) -> Vec<String> {
         return vec![];
     };
 
-    let expression = match jmespath::compile(path) {
-        Ok(expr) => expr,
-        Err(e) => {
-            warn!("Invalid JMESPath expression '{}': {}", path, e);
-            return vec![];
-        }
+    let expression = match compiled(path) {
+        Some(expr) => expr,
+        None => return vec![],
     };
 
     let result = match expression.search(json_value) {
@@ -51,6 +85,23 @@ pub fn process(path: &str, content_item: &ContentItem) -> Vec<String> {
 }
 
 /// Recursively convert a JMESPath result into a flat `Vec<String>`.
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+
+    /// Guard: JMESPath expressions compile once and are cached per distinct
+    /// expression. Fails (or stops compiling) if the compile cache is removed.
+    #[test]
+    fn expressions_are_compiled_once_and_cached() {
+        COMPILED.with(|c| c.borrow_mut().clear());
+        let _ = compiled("foo.bar");
+        let _ = compiled("foo.bar");
+        assert_eq!(COMPILED.with(|c| c.borrow().len()), 1, "repeated expr must compile once");
+        let _ = compiled("baz[0]");
+        assert_eq!(COMPILED.with(|c| c.borrow().len()), 2, "distinct expr adds one entry");
+    }
+}
+
 fn jmespath_value_to_strings(value: &jmespath::Variable) -> Vec<String> {
     match value {
         jmespath::Variable::Null => vec![],

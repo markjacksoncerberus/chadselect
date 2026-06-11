@@ -4,13 +4,38 @@
 //! Supports standard CSS selectors, custom text pseudo-selectors for
 //! content-based filtering, and post-processing text functions.
 
-use std::collections::HashSet;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 
 use log::warn;
 use scraper::{ElementRef, Html, Selector};
 
 use crate::content::ContentItem;
 use crate::functions::{self, TextFunction};
+
+thread_local! {
+    /// Cache of parsed CSS selectors, keyed by the selector string.
+    ///
+    /// `Selector::parse` runs the CSS parser on every call; a crawler reuses the
+    /// same selectors across many documents, so parsing once per distinct
+    /// selector (per thread) removes that repeated cost. `Selector` is `Clone`,
+    /// so we clone out of the cache. Invalid selectors cache as `None` to avoid
+    /// re-parsing / re-warning each call.
+    static COMPILED: RefCell<HashMap<String, Option<Selector>>> = RefCell::new(HashMap::new());
+}
+
+/// Parse `selector` (or fetch the cached `Selector`). Returns `None` for an
+/// invalid selector; the caller logs context-specific warnings.
+fn cached_selector(selector: &str) -> Option<Selector> {
+    COMPILED.with(|c| {
+        if let Some(s) = c.borrow().get(selector) {
+            return s.clone();
+        }
+        let parsed = Selector::parse(selector).ok();
+        c.borrow_mut().insert(selector.to_string(), parsed.clone());
+        parsed
+    })
+}
 
 // ─── Text pseudo-selector types ─────────────────────────────────────────────
 
@@ -76,10 +101,10 @@ fn process_standard(selector_with_functions: &str, content_item: &ContentItem) -
     // Use the shared, already-parsed HTML document.
     let html_doc = content_item.html();
 
-    let css_selector = match Selector::parse(css_selector_str) {
-        Ok(s) => s,
-        Err(e) => {
-            warn!("Invalid CSS selector '{}': {:?}", css_selector_str, e);
+    let css_selector = match cached_selector(css_selector_str) {
+        Some(s) => s,
+        None => {
+            warn!("Invalid CSS selector '{}'", css_selector_str);
             return vec![];
         }
     };
@@ -162,17 +187,16 @@ fn process_with_text_selectors(
 
     // Stage 1: Resolve base elements.
     let (base_elements, element_texts): (Vec<_>, Vec<_>) = if parsed.base_selector.is_empty() {
-        let elements: Vec<_> = html_doc
-            .select(&Selector::parse("*").unwrap())
-            .collect();
+        let star = cached_selector("*").expect("'*' is a valid selector");
+        let elements: Vec<_> = html_doc.select(&star).collect();
         let texts: Vec<_> = elements
             .iter()
             .map(|e| e.text().collect::<Vec<_>>().join(" ").trim().to_string())
             .collect();
         (elements, texts)
     } else if !cached_data.is_empty() {
-        match Selector::parse(&parsed.base_selector) {
-            Ok(selector) => {
+        match cached_selector(&parsed.base_selector) {
+            Some(selector) => {
                 let all_elements: Vec<_> = html_doc.select(&selector).collect();
                 let mut elements = Vec::new();
                 let mut texts = Vec::new();
@@ -184,17 +208,14 @@ fn process_with_text_selectors(
                 }
                 (elements, texts)
             }
-            Err(e) => {
-                warn!(
-                    "Invalid base CSS selector '{}': {:?}",
-                    parsed.base_selector, e
-                );
+            None => {
+                warn!("Invalid base CSS selector '{}'", parsed.base_selector);
                 return vec![];
             }
         }
     } else {
-        match Selector::parse(&parsed.base_selector) {
-            Ok(selector) => {
+        match cached_selector(&parsed.base_selector) {
+            Some(selector) => {
                 let elements: Vec<_> = html_doc.select(&selector).collect();
                 let texts: Vec<_> = elements
                     .iter()
@@ -202,11 +223,8 @@ fn process_with_text_selectors(
                     .collect();
                 (elements, texts)
             }
-            Err(e) => {
-                warn!(
-                    "Invalid base CSS selector '{}': {:?}",
-                    parsed.base_selector, e
-                );
+            None => {
+                warn!("Invalid base CSS selector '{}'", parsed.base_selector);
                 return vec![];
             }
         }
@@ -283,10 +301,10 @@ fn apply_post_selector<'a>(
         _ => (' ', post), // descendant
     };
 
-    let selector = match Selector::parse(rest) {
-        Ok(s) => s,
-        Err(e) => {
-            warn!("Invalid post CSS selector '{}': {:?}", rest, e);
+    let selector = match cached_selector(rest) {
+        Some(s) => s,
+        None => {
+            warn!("Invalid post CSS selector '{}'", rest);
             return Vec::new();
         }
     };
@@ -339,7 +357,7 @@ fn get_cached_elements_data(
 
     // Cache miss — query the shared document and store.
     let html_doc = content_item.html();
-    if let Ok(selector) = Selector::parse(base_selector) {
+    if let Some(selector) = cached_selector(base_selector) {
         let elements: Vec<_> = html_doc.select(&selector).collect();
         let cache_data: Vec<_> = elements
             .iter()
@@ -428,5 +446,22 @@ fn parse_with_text_selectors(input: &str) -> ParsedCssSelector {
         text_pseudo,
         post_selector,
         functions: text_functions,
+    }
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+
+    /// Guard: CSS selectors parse once and are cached per distinct selector.
+    /// Fails (or stops compiling) if the parse cache is removed.
+    #[test]
+    fn selectors_are_parsed_once_and_cached() {
+        COMPILED.with(|c| c.borrow_mut().clear());
+        let _ = cached_selector("div.product");
+        let _ = cached_selector("div.product");
+        assert_eq!(COMPILED.with(|c| c.borrow().len()), 1, "repeated selector must parse once");
+        let _ = cached_selector("span.price");
+        assert_eq!(COMPILED.with(|c| c.borrow().len()), 2, "distinct selector adds one entry");
     }
 }
