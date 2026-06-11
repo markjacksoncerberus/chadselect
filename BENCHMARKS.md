@@ -114,3 +114,31 @@ flatten categories 🦀 ██████████████████�
 | **JMESPath** | Mixed | Mixed | Roughly equivalent; both pure-language impls |
 
 **Bottom line:** Rust wins big on CSS and XPath. Python wins on regex (C-backed stdlib advantage). JMESPath is a wash. Pick the language that fits your stack — the API is identical either way.
+
+---
+
+## Real-selector performance suite (`chadselect-rs/eval/`)
+
+The micro-benches above use a handful of hand-written queries. The **real**
+production load is ~2,000 selectors from the `hermes_rust` crawler fleet — and a
+post-0.3.x CPU regression only showed up there. The eval suite replays every
+real `css:`/`xpath:` selector against one ~2 MB synthetic dealer page and ranks
+them by warm per-evaluation CPU (see `eval/README.md`).
+
+What it found: the old O(n²) predicate bug was genuinely fixed (scaling exponent
+~1.0), but **every XPath query paid a large per-query whole-document cost** —
+97 % of fleet XPaths are `//`-rooted, and the document-order map was rebuilt on
+every query. XPath was ~130× the CSS cost in aggregate.
+
+`chadselect 0.4.1` / `chadpath 0.3.1` attack that (order-map cache, `*`-wildcard
+fast-path, no-alloc `name()`, lazy axis iterators):
+
+| Metric (blocks=150, 2086 selectors) | 0.3.0 | 0.4.1 | Δ |
+|---|---:|---:|---|
+| Full warm-timing pass | 103.4 s | **84.5 s** | −18 % |
+| `//`-rooted XPath (mean) | 63.3 ms | 49.5 ms | −22 % |
+| `contains()` XPath (mean) | 69.9 ms | 55.5 ms | −21 % |
+| trivial `//title` (16k-node page) | 12.3 ms | 7.2 ms | −41 % |
+| `/html/body` (per-query overhead) | 2.05 ms | 0.28 ms | 7.3× |
+
+> Run: `cargo run --release --example selector_eval -- --blocks 150 --csv eval/results.csv`

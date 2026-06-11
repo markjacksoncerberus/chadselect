@@ -60,8 +60,10 @@ pub fn process(xpath_with_functions: &str, content_item: &ContentItem) -> Vec<St
         evaluate_on_deep_stack(&content_item.content, raw_expr)
     } else {
         // Positional predicates are evaluated correctly by the (forked) chadpath
-        // engine, so no expression rewriting is needed.
-        xpath_eval::evaluate(&content_item.html(), raw_expr)
+        // engine, so no expression rewriting is needed. Reuse the per-document
+        // cached order map so we don't re-walk the whole tree for every query.
+        let (doc, order) = content_item.html_with_order();
+        xpath_eval::evaluate_with_order(&doc, order, raw_expr)
     };
 
     if !text_functions.is_empty() {

@@ -44,10 +44,16 @@ enum Loc {
 /// Pre-order rank of every node, so document-order comparisons are O(1).
 /// Without this, `cmp_document_order` would re-walk to the root per call and
 /// chadpath's per-step nodeset sort would become O(n²).
-type OrderMap = HashMap<NodeId, u32>;
+///
+/// This map depends only on the document, not the query, so it is built once
+/// per parsed document and cached on the [`ContentItem`](crate::content::ContentItem)
+/// alongside the `Html` — see [`ENode::root_with_order`]. (Rebuilding it per
+/// query — the fleet runs hundreds of selectors per page — was a dominant slice
+/// of the post-0.3.x CPU regression.)
+pub type OrderMap = HashMap<NodeId, u32>;
 
 /// Assign each node a pre-order (document-order) rank in a single pass.
-fn build_order(html: &Html) -> OrderMap {
+pub fn build_order(html: &Html) -> OrderMap {
     let mut map = HashMap::new();
     for (rank, n) in html.tree.root().descendants().enumerate() {
         map.insert(n.id(), rank as u32);
@@ -67,6 +73,10 @@ pub struct ENode {
 impl ENode {
     /// Wrap the document root of an already-parsed `Html` tree, computing the
     /// document-order index once for the whole document.
+    ///
+    /// Prefer [`root_with_order`](ENode::root_with_order) on the hot path: this
+    /// constructor rebuilds the whole-document order map every call, which is
+    /// wasteful when many queries run against the same document.
     pub fn root_of(doc: &Rc<Html>) -> Self {
         ENode {
             doc: doc.clone(),
@@ -75,11 +85,14 @@ impl ENode {
         }
     }
 
-    fn node_at(&self, id: NodeId) -> Self {
+    /// Wrap the document root reusing a pre-built (cached) order map, so the
+    /// O(n) document-order pass is paid once per document rather than once per
+    /// query.
+    pub fn root_with_order(doc: &Rc<Html>, order: Rc<OrderMap>) -> Self {
         ENode {
-            doc: self.doc.clone(),
-            order: self.order.clone(),
-            loc: Loc::Node(id),
+            doc: doc.clone(),
+            order,
+            loc: Loc::Node(doc.tree.root().id()),
         }
     }
 
@@ -134,6 +147,70 @@ impl ENode {
 
     fn collect(v: Vec<ENode>) -> Box<dyn Iterator<Item = ENode>> {
         Box::new(v.into_iter())
+    }
+
+    /// Construct a sibling/parent-chain iterator that walks `id → step(id) → …`
+    /// lazily, yielding owned `ENode`s without materialising a `Vec`. `step`
+    /// returns the next node id in the chain (or `None` to stop).
+    fn chain_iter(
+        &self,
+        first: Option<NodeId>,
+        step: fn(&Html, NodeId) -> Option<NodeId>,
+    ) -> Box<dyn Iterator<Item = ENode>> {
+        let doc = self.doc.clone();
+        let order = self.order.clone();
+        let mut next = first;
+        Box::new(std::iter::from_fn(move || {
+            let id = next?;
+            next = step(&doc, id);
+            Some(ENode {
+                doc: doc.clone(),
+                order: order.clone(),
+                loc: Loc::Node(id),
+            })
+        }))
+    }
+}
+
+// ── Free helpers for lazy traversal (operate on ids, borrow the tree only for
+//    the duration of one step so the resulting iterators can own an `Rc<Html>`
+//    and stay `'static`). ──
+
+fn first_child_id(doc: &Html, id: NodeId) -> Option<NodeId> {
+    doc.tree.get(id)?.first_child().map(|c| c.id())
+}
+fn next_sibling_id(doc: &Html, id: NodeId) -> Option<NodeId> {
+    doc.tree.get(id)?.next_sibling().map(|s| s.id())
+}
+fn prev_sibling_id(doc: &Html, id: NodeId) -> Option<NodeId> {
+    doc.tree.get(id)?.prev_sibling().map(|s| s.id())
+}
+fn parent_id(doc: &Html, id: NodeId) -> Option<NodeId> {
+    doc.tree.get(id)?.parent().map(|p| p.id())
+}
+
+/// Pre-order successor of `id` **bounded to the subtree rooted at `root`**
+/// (`root` itself is never revisited). Matches `descendants().skip(1)`.
+fn preorder_next_within(doc: &Html, id: NodeId, root: NodeId) -> Option<NodeId> {
+    let n = doc.tree.get(id)?;
+    if let Some(c) = n.first_child() {
+        return Some(c.id());
+    }
+    // No child: climb until we find an ancestor (below `root`) with a next
+    // sibling; stop when we'd leave the subtree.
+    let mut node = n;
+    loop {
+        if node.id() == root {
+            return None;
+        }
+        if let Some(s) = node.next_sibling() {
+            return Some(s.id());
+        }
+        let p = node.parent()?;
+        if p.id() == root {
+            return None;
+        }
+        node = p;
     }
 }
 
@@ -201,14 +278,17 @@ impl Node for ENode {
     }
 
     fn name(&self) -> Option<QName> {
-        let local = match self.loc {
+        match self.loc {
+            // Hot path: pass the borrowed element name straight to the memo —
+            // `name()` is called for every node a name test visits (i.e. every
+            // node under a `//tag` step), so the previous per-call
+            // `.to_string()` was a heap allocation per visited node.
             Loc::Node(id) => match self.doc.tree.get(id)?.value() {
-                SNode::Element(el) => el.name().to_string(),
-                _ => return None,
+                SNode::Element(el) => local_qname(el.name()),
+                _ => None,
             },
-            Loc::Attr { owner, idx } => self.attr_pair(owner, idx)?.0,
-        };
-        local_qname(&local)
+            Loc::Attr { owner, idx } => local_qname(&self.attr_pair(owner, idx)?.0),
+        }
     }
 
     fn to_qname(&self, name: impl AsRef<str>) -> Result<QName, Error> {
@@ -294,76 +374,66 @@ impl Node for ENode {
     // ── Axes ──
 
     fn child_iter(&self) -> Self::NodeIterator {
-        let mut v = Vec::new();
-        if let Loc::Node(id) = self.loc {
-            if let Some(nref) = self.doc.tree.get(id) {
-                if matches!(
-                    nref.value(),
-                    SNode::Document | SNode::Fragment | SNode::Element(_)
-                ) {
-                    for c in nref.children() {
-                        v.push(self.node_at(c.id()));
-                    }
+        // Lazy: first child, then the next-sibling chain — no intermediate Vec.
+        // `child_iter` is hit per element by `text()`/child-step predicates over
+        // a `//*` node set, so avoiding a per-call allocation matters.
+        let first = match self.loc {
+            Loc::Node(id) => match self.doc.tree.get(id).map(|n| n.value()) {
+                Some(SNode::Document) | Some(SNode::Fragment) | Some(SNode::Element(_)) => {
+                    first_child_id(&self.doc, id)
                 }
-            }
-        }
-        ENode::collect(v)
+                _ => None,
+            },
+            Loc::Attr { .. } => None,
+        };
+        self.chain_iter(first, next_sibling_id)
     }
 
     fn ancestor_iter(&self) -> Self::NodeIterator {
-        let mut v = Vec::new();
-        let start = match self.loc {
-            Loc::Node(id) => Some(id),
-            Loc::Attr { owner, .. } => {
-                v.push(self.node_at(owner));
-                Some(owner)
-            }
+        // Parent chain (ego-tree `ancestors()`); for a synthetic attribute node
+        // the chain starts at its owning element.
+        let first = match self.loc {
+            Loc::Node(id) => parent_id(&self.doc, id),
+            Loc::Attr { owner, .. } => Some(owner),
         };
-        if let Some(id) = start {
-            if let Some(nref) = self.doc.tree.get(id) {
-                for a in nref.ancestors() {
-                    v.push(self.node_at(a.id()));
-                }
-            }
-        }
-        ENode::collect(v)
+        self.chain_iter(first, parent_id)
     }
 
     fn descend_iter(&self) -> Self::NodeIterator {
-        let mut v = Vec::new();
-        if let Loc::Node(id) = self.loc {
-            if let Some(nref) = self.doc.tree.get(id) {
-                // descendants() yields self first; skip it for the descendant axis.
-                for d in nref.descendants().skip(1) {
-                    v.push(self.node_at(d.id()));
-                }
-            }
-        }
-        ENode::collect(v)
+        // Lazy pre-order traversal bounded to this node's subtree (excludes
+        // self). For `//` this is the whole-document walk, so not buffering all
+        // N nodes into a Vec up front is the biggest single allocation saving.
+        let (doc, order) = (self.doc.clone(), self.order.clone());
+        let root = match self.loc {
+            Loc::Node(id) => id,
+            Loc::Attr { .. } => return ENode::collect(Vec::new()),
+        };
+        let mut next = first_child_id(&doc, root);
+        Box::new(std::iter::from_fn(move || {
+            let id = next?;
+            next = preorder_next_within(&doc, id, root);
+            Some(ENode {
+                doc: doc.clone(),
+                order: order.clone(),
+                loc: Loc::Node(id),
+            })
+        }))
     }
 
     fn next_iter(&self) -> Self::NodeIterator {
-        let mut v = Vec::new();
-        if let Loc::Node(id) = self.loc {
-            if let Some(nref) = self.doc.tree.get(id) {
-                for s in nref.next_siblings() {
-                    v.push(self.node_at(s.id()));
-                }
-            }
-        }
-        ENode::collect(v)
+        let first = match self.loc {
+            Loc::Node(id) => next_sibling_id(&self.doc, id),
+            Loc::Attr { .. } => None,
+        };
+        self.chain_iter(first, next_sibling_id)
     }
 
     fn prev_iter(&self) -> Self::NodeIterator {
-        let mut v = Vec::new();
-        if let Loc::Node(id) = self.loc {
-            if let Some(nref) = self.doc.tree.get(id) {
-                for s in nref.prev_siblings() {
-                    v.push(self.node_at(s.id()));
-                }
-            }
-        }
-        ENode::collect(v)
+        let first = match self.loc {
+            Loc::Node(id) => prev_sibling_id(&self.doc, id),
+            Loc::Attr { .. } => None,
+        };
+        self.chain_iter(first, prev_sibling_id)
     }
 
     fn attribute_iter(&self) -> Self::NodeIterator {

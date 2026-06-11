@@ -6,6 +6,8 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use crate::engine::xnode::{build_order, OrderMap};
+
 /// Content type enumeration for explicit content specification.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ContentType {
@@ -32,6 +34,12 @@ pub struct ContentItem {
     /// Lazily parsed HTML document (via `scraper`/html5ever), **shared** by
     /// both the CSS and XPath engines — the HTML is parsed exactly once.
     pub(crate) html_document: RefCell<Option<Rc<Html>>>,
+    /// Lazily built document-order map for the XPath engine, cached **per
+    /// document**. The map depends only on the parsed tree, not the query, so
+    /// building it once here — rather than once per `evaluate()` call — removes
+    /// an O(n) whole-document pass from every one of the hundreds of XPath
+    /// selectors the fleet runs against a single page.
+    pub(crate) html_order: RefCell<Option<Rc<OrderMap>>>,
     /// Element-text cache for CSS text pseudo-selectors: selector → Vec<(element_index, text)>.
     pub(crate) element_text_cache: RefCell<HashMap<String, Vec<(usize, String)>>>,
 }
@@ -44,6 +52,7 @@ impl ContentItem {
             content_type,
             json_value: RefCell::new(None),
             html_document: RefCell::new(None),
+            html_order: RefCell::new(None),
             element_text_cache: RefCell::new(HashMap::new()),
         }
     }
@@ -59,6 +68,19 @@ impl ContentItem {
             *doc = Some(Rc::new(Html::parse_document(&self.content)));
         }
         doc.as_ref().unwrap().clone()
+    }
+
+    /// Get the shared parsed document together with its cached document-order
+    /// map, building either on first use. The XPath engine uses this so the
+    /// O(n) order pass is amortised across all queries on the document instead
+    /// of repeated per query.
+    pub(crate) fn html_with_order(&self) -> (Rc<Html>, Rc<OrderMap>) {
+        let doc = self.html();
+        let mut order = self.html_order.borrow_mut();
+        if order.is_none() {
+            *order = Some(Rc::new(build_order(&doc)));
+        }
+        (doc, order.as_ref().unwrap().clone())
     }
 }
 

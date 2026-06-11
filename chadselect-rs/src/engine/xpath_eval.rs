@@ -13,7 +13,7 @@ use chadpath::transform::context::{ContextBuilder, StaticContextBuilder};
 use chadpath::transform::Transform;
 use chadpath::xdmerror::{Error, ErrorKind};
 
-use crate::engine::xnode::ENode;
+use crate::engine::xnode::{ENode, OrderMap};
 
 thread_local! {
     /// Cache of compiled XPath expressions, keyed by the expression string.
@@ -47,7 +47,17 @@ fn compile(expr: &str) -> Option<Rc<Transform<ENode>>> {
 /// Evaluate `expr` over an already-parsed `Html` document, returning trimmed,
 /// non-empty string values in document order. Never panics; invalid
 /// expressions or evaluation errors yield an empty vector.
+///
+/// Builds the document-order map itself. On the hot path (many queries per
+/// document) prefer [`evaluate_with_order`] with a cached map.
 pub fn evaluate(doc: &Rc<Html>, expr: &str) -> Vec<String> {
+    let order = Rc::new(crate::engine::xnode::build_order(doc));
+    evaluate_with_order(doc, order, expr)
+}
+
+/// Like [`evaluate`], but reuses a pre-built (cached) document-order map so the
+/// O(n) order pass is not repeated for every query against the same document.
+pub fn evaluate_with_order(doc: &Rc<Html>, order: Rc<OrderMap>, expr: &str) -> Vec<String> {
     let Some(transform) = compile(expr) else {
         return vec![];
     };
@@ -59,7 +69,7 @@ pub fn evaluate(doc: &Rc<Html>, expr: &str) -> Vec<String> {
         .build();
 
     let ctxt = ContextBuilder::new()
-        .context(vec![Item::Node(ENode::root_of(doc))])
+        .context(vec![Item::Node(ENode::root_with_order(doc, order))])
         .result_document(ENode::new_document())
         .build();
 
